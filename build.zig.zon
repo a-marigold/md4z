@@ -10,4 +10,14 @@
         "LICENSE",
         "README.md",
     },
+    .dependencies = .{
+        .md4c = .{
+            .url = "https://github.com/mity/md4c/archive/refs/tags/v0.6.0.tar.gz",
+            .hash = "N-V-__8AAEVDEgAtMuYZhXcl61grSDsy5AEXDjgWT0yKUDNs",
+        },
+        .translate_c = .{
+            .url = "git+https://codeberg.org/ziglang/translate-c#f200bb1d0ea9228061d79cde53f46c045cd5c772",
+            .hash = "translate_c-0.1.0-dev-Q_BUWrZkBwDAivD2kWX9knhl453C0LZBZi8gP2X-gCHB",
+        },
+    },
 }
