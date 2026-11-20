@@ -1,6 +1,34 @@
 const md4c = @import("md4c");
 
-// TODO: add docs
+/// `Visitor` is a namespace (struct, enum, etc) with
+/// public function declarations, that is, callbacks.s
+///
+/// Callbacks receive a mutable pointer to the visitor.
+///
+/// Callbacks can return errors.
+/// If a callback returns an error,
+/// `parse` stops parsing and returns the error.
+///
+/// Example:
+/// ```zig
+/// // Can be any namespace (struct, enum, union, opaque)
+/// const Visitor = struct {
+///     user_field: SomeType,
+///     user_field1: SomeType1,
+///
+///     // Callbacks can return errors
+///     pub fn enterBlock(self: *Visitor, block_type: BlockType, block: *const Block) SomeError!void {}
+///     pub fn leaveBlock(self: *Visitor, block_type: BlockType, block: *const Block) !void {}
+///     pub fn enterSpan(self: *Visitor, span_type: SpanType, block: *const Span) void {}
+///     pub fn leaveSpan(self: *Visitor, span_type: SpanType, block: *const Span) void {}
+///     pub fn text(self: *Visitor, data: []const u8) void {}
+/// };
+///
+/// const parser: Parser(Visitor) = .init(.{ .user_field = ... });
+///
+/// // This may return an error from callbacks
+/// try parser.parse("# *Hello*");
+/// ```
 pub fn Parser(comptime Visitor: type) type {
     return struct {
         inner: md4c.MD_PARSER,
@@ -197,3 +225,5 @@ pub const Span = union {
     FootnoteRef: md4c.MD_SPAN_FOOTNOTE_REF_DETAIL,
     Mark: void,
 };
+
+test {}
