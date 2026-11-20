@@ -1,5 +1,89 @@
 const md4c = @import("md4c");
 
+// TODO: add docs
+pub fn Parser(comptime Visitor: type) type {
+    return struct {
+        inner: md4c.MD_PARSER,
+        visitor: Visitor,
+
+        pub fn init(visitor: Visitor) @This() {
+            return .{
+                .inner = .{
+                    .enter_block = enterBlock,
+                    .leave_block = leaveBlock,
+                    .enter_span = enterSpan,
+                    .leave_span = leaveSpan,
+                    .text = text,
+
+                    .flags = 0,
+
+                    // Reserved and must be set to zero
+                    .abi_version = 0,
+
+                    .debug_log = null,
+                    .syntax = null,
+                },
+                .visitor = visitor,
+            };
+        }
+
+        /// Parses Markdown of `input` and calls the visitor callbacks.
+        ///
+        /// If the `md4c` parser fails, `ParseError.ParseFailed` is returned.
+        ///
+        /// If a visitor callback returns an error, immediately returns that error.
+        pub inline fn parse(self: *@This(), input: []const u8) (ParseError || anyerror)!void {
+            const result = md4c.md_parse(input.ptr, input.len, &self.inner, &self.visitor);
+
+            return switch (result) {
+                0 => {},
+                -1 => ParseError.ParseFailed,
+                else => @errorFromInt(result),
+            };
+        }
+
+        fn enterBlock(block_type: md4c.MD_BLOCKTYPE, detail: ?*anyopaque, userdata: ?*anyopaque) callconv(.c) c_int {
+            const visitor: *Visitor = @ptrCast(userdata);
+
+            const block: *const Block = @ptrCast(@alignCast(detail));
+
+            visitor.enterBlock(@fromBackingInt(block_type), block) catch |err| return @intFromError(err);
+        }
+        fn leaveBlock(block_type: md4c.MD_BLOCKTYPE, detail: ?*anyopaque, userdata: ?*anyopaque) callconv(.c) c_int {
+            const visitor: *Visitor = @ptrCast(userdata);
+
+            const block: *const Block = @ptrCast(@alignCast(detail));
+
+            visitor.leaveBlock(@fromBackingInt(block_type), block) catch |err| return @intFromError(err);
+        }
+
+        fn enterSpan(span_type: md4c.MD_BLOCKTYPE, detail: ?*anyopaque, userdata: ?*anyopaque) callconv(.c) c_int {
+            const visitor: *Visitor = @ptrCast(userdata);
+
+            const span: *const Span = @ptrCast(@alignCast(detail));
+
+            visitor.enterSpan(@fromBackingInt(span_type), span) catch |err| return @intFromError(err);
+        }
+        fn leaveSpan(span_type: md4c.MD_BLOCKTYPE, detail: ?*anyopaque, userdata: ?*anyopaque) callconv(.c) c_int {
+            const visitor: *Visitor = @ptrCast(userdata);
+
+            const span: *const Span = @ptrCast(@alignCast(detail));
+
+            visitor.leaveSpan(@fromBackingInt(span_type), span) catch |err| return @intFromError(err);
+        }
+
+        fn text(text_type: md4c.MD_BLOCKTYPE, data: [*c]const md4c.MD_CHAR, size: md4c.MD_SIZE, userdata: ?*anyopaque) callconv(.c) c_int {
+            const visitor: *Visitor = @ptrCast(userdata);
+
+            visitor.text(@fromBackingInt(text_type), data.?[0..size]) catch |err| return @intFromError(err);
+        }
+    };
+}
+
+/// `parse` function returns this if
+/// the `md4c` parser fails for some reason.
+pub const ParseError = error{ParseFailed};
+
 pub const BlockType = enum(md4c.MD_BLOCKTYPE) {
     Doc = md4c.MD_BLOCK_DOC,
     Quote = md4c.MD_BLOCK_QUOTE,
