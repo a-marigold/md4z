@@ -1,3 +1,11 @@
+# About
+
+Zig bindings of [md4c](https://github.com/mity/md4c) parser.
+
+- Zig version - 0.17.1
+- `md4c` version - 0.6.0
+- `md4c-html` is not supported
+
 # Usage
 
 The only APIs of this library:
@@ -6,6 +14,7 @@ The only APIs of this library:
 3. `Parser.parse(input: []const u8)`.
 
 `Visitor` is a namespace (struct, enum, etc).
+
 Visitor can have any fields, any public variable or fn declarations,
 but it must have at least the 5 callbacks as `pub fn`.
 
