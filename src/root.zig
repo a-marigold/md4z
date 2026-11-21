@@ -5,6 +5,7 @@ pub const BlockType = parser.BlockType;
 pub const Block = parser.Block;
 pub const SpanType = parser.SpanType;
 pub const Span = parser.Span;
+pub const TextType = parser.TextType;
 
 pub const FLAG_COLLAPSEWHITESPACE = parser.FLAG_COLLAPSEWHITESPACE;
 pub const FLAG_PERMISSIVEATXHEADERS = parser.FLAG_PERMISSIVEATXHEADERS;

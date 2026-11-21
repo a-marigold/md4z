@@ -1,13 +1,11 @@
 const md4c = @import("md4c");
 
-/// `Visitor` is a namespace (struct, enum, etc) with
-/// public function declarations, that is, callbacks.s
+/// `Visitor` is a namespace (struct, enum, etc) with public function declarations (callbacks).
 ///
-/// Callbacks receive a mutable pointer to the visitor.
+/// Callbacks receive a mutable pointer to their visitor.
 ///
-/// Callbacks can return errors.
-/// If a callback returns an error,
-/// `parse` stops parsing and returns the error.
+/// Callbacks can or can not return errors.
+/// If a callback returns an error, `parse` stops and returns that error.
 ///
 /// Example:
 /// ```zig
@@ -16,17 +14,30 @@ const md4c = @import("md4c");
 ///     user_field: SomeType,
 ///     user_field1: SomeType1,
 ///
-///     // Callbacks can return errors
-///     pub fn enterBlock(self: *Visitor, block_type: BlockType, block: *const Block) SomeError!void {}
-///     pub fn leaveBlock(self: *Visitor, block_type: BlockType, block: *const Block) !void {}
-///     pub fn enterSpan(self: *Visitor, span_type: SpanType, block: *const Span) void {}
-///     pub fn leaveSpan(self: *Visitor, span_type: SpanType, block: *const Span) void {}
-///     pub fn text(self: *Visitor, data: []const u8) void {}
+///     // Callbacks can or can not return errors
+///
+///     // It's guaranteed that `leaveBlock` is called
+///     // for every span that appears in `enterBlock`
+///     // (if there are no errors)
+///     pub fn enterBlock(self: *@This(), block_type: BlockType, block: *const Block) SomeError!void {}
+///     pub fn leaveBlock(self: *@This(), block_type: BlockType, block: *const Block) !void {}
+///
+///     // It's guaranteed that `leaveSpan` is called
+///     // for every span that appears in `enterSpan`
+///     // (if there are no errors)
+///     pub fn enterSpan(self: *@This(), span_type: SpanType, block: *const Span) void {}
+///     pub fn leaveSpan(self: *@This(), span_type: SpanType, block: *const Span) void {}
+///
+///     // Isn't called for the whole content of a block or span at once.
+///     // Instead, textual contents of blocks and spans can be
+///     // sliced into parts so `text` is called multiple times for it
+///     pub fn text(self: *@This(), text_type: TextType, data: []const u8) void {}
 /// };
 ///
-/// const parser: Parser(Visitor) = .init(.{ .user_field = ... });
+/// const parser: Parser(Visitor) = .init(.{ .user_field = ... }, flags);
 ///
-/// // This may return an error from callbacks
+/// // May return an error from a callback,
+/// // which stops the parsing completely
 /// try parser.parse("# *Hello*");
 /// ```
 pub fn Parser(comptime Visitor: type) type {
@@ -87,14 +98,14 @@ pub fn Parser(comptime Visitor: type) type {
             visitor.leaveBlock(@fromBackingInt(block_type), block) catch |err| return @intFromError(err);
         }
 
-        fn enterSpan(span_type: md4c.MD_BLOCKTYPE, detail: ?*anyopaque, userdata: ?*anyopaque) callconv(.c) c_int {
+        fn enterSpan(span_type: md4c.MD_SPANTYPE, detail: ?*anyopaque, userdata: ?*anyopaque) callconv(.c) c_int {
             const visitor: *Visitor = @ptrCast(userdata);
 
             const span: *const Span = @ptrCast(@alignCast(detail));
 
             visitor.enterSpan(@fromBackingInt(span_type), span) catch |err| return @intFromError(err);
         }
-        fn leaveSpan(span_type: md4c.MD_BLOCKTYPE, detail: ?*anyopaque, userdata: ?*anyopaque) callconv(.c) c_int {
+        fn leaveSpan(span_type: md4c.MD_SPANTYPE, detail: ?*anyopaque, userdata: ?*anyopaque) callconv(.c) c_int {
             const visitor: *Visitor = @ptrCast(userdata);
 
             const span: *const Span = @ptrCast(@alignCast(detail));
@@ -102,7 +113,7 @@ pub fn Parser(comptime Visitor: type) type {
             visitor.leaveSpan(@fromBackingInt(span_type), span) catch |err| return @intFromError(err);
         }
 
-        fn text(text_type: md4c.MD_BLOCKTYPE, data: [*c]const md4c.MD_CHAR, size: md4c.MD_SIZE, userdata: ?*anyopaque) callconv(.c) c_int {
+        fn text(text_type: md4c.MD_TEXTTYPE, data: [*c]const md4c.MD_CHAR, size: md4c.MD_SIZE, userdata: ?*anyopaque) callconv(.c) c_int {
             const visitor: *Visitor = @ptrCast(userdata);
 
             visitor.text(@fromBackingInt(text_type), data.?[0..size]) catch |err| return @intFromError(err);
@@ -226,4 +237,13 @@ pub const Span = union {
     Mark: void,
 };
 
-test {}
+pub const TextType = enum(md4c.MD_TEXTTYPE) {
+    Normal = 0,
+    NullChar = 1,
+    HardLineBreak = 2,
+    LineBreak = 3,
+    Entity = 4,
+    Code = 5,
+    Html = 6,
+    LatextMath = 7,
+};
