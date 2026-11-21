@@ -1,4 +1,4 @@
-# About
+### About
 
 Zig bindings of [md4c](https://github.com/mity/md4c) parser.
 
@@ -6,7 +6,7 @@ Zig bindings of [md4c](https://github.com/mity/md4c) parser.
 - `md4c` version - 0.6.0
 - `md4c-html` is not supported
 
-# Usage
+### Usage
 
 The only APIs of this library:
 1. `Parser(comptime Visitor: type)`.
