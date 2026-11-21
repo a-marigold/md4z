@@ -1,6 +1,8 @@
 const std = @import("std");
 const Build = std.Build;
 
+const Translator = @import("translate_c").Translator;
+
 pub fn build(b: *Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -8,7 +10,6 @@ pub fn build(b: *Build) void {
     const md4c = b.dependency("md4c", .{});
 
     const translate_c = b.dependency("translate_c", .{});
-    const Translator = @import("translate_c").Translator;
 
     const c_translator: Translator = .init(translate_c, .{
         .c_source_file = md4c.path("src/md4c.h"),
@@ -17,7 +18,7 @@ pub fn build(b: *Build) void {
     });
     const md4c_mod = c_translator.mod;
 
-    const root_mod = b.createModule(.{
+    const root_mod = b.addModule("md4z", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
@@ -25,6 +26,7 @@ pub fn build(b: *Build) void {
             .{ .name = "md4c", .module = md4c_mod },
         },
     });
+    root_mod.addCSourceFile(.{ .file = md4c.path("src/md4c.c"), .flags = &.{} });
 
     const test_exe = b.addTest(.{ .root_module = root_mod });
 
