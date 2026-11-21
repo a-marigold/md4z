@@ -27,7 +27,15 @@ because they're compounds of features of `FLAG_*` declarations.
 `Visitor` can have any fields, any public variable or fn declarations,
 but it must have at least the 5 callbacks as `pub fn`.
 
-Callbacks receive a mutable pointer to their visitor.
+Parameters of callbacks: 
+- A mutable pointer to the visitor.
+- `enterBlock`, `leaveBlock`, `enterSpan` and `leaveSpan` also receive:
+  1. `block_type` or `span_type`, which is an enum.
+  2. `*const Block` or `*const Span`, which a pointer to bare union, 
+     active field of which corresponds to the active field of the `_type` enum
+- `text` also receives:
+  1. `text_type`, which is an enum.
+  2. `data`, which is a **non**-null-terminated slice of the text.
 
 Callbacks can return errors. 
 If a callback returns an error, `parse` stops and returns that error.
@@ -41,21 +49,27 @@ const Visitor = struct {
 
     // Callbacks can or can not return errors
 
-    // 
+    // It's guaranteed that `leaveBlock` is called
+    // for every span that appears in `enterBlock`
+    // (if there are no errors)
     pub fn enterBlock(self: *@This(), block_type: BlockType, block: *const Block) SomeError!void {}
     pub fn leaveBlock(self: *@This(), block_type: BlockType, block: *const Block) !void {}
 
-    //
+    // It's guaranteed that `leaveSpan` is called
+    // for every span that appears in `enterSpan`
+    // (if there are no errors)
     pub fn enterSpan(self: *@This(), span_type: SpanType, block: *const Span) void {}
     pub fn leaveSpan(self: *@This(), span_type: SpanType, block: *const Span) void {}
-    
-	//
-	pub fn text(self: *@This(), data: []const u8) void {}
+
+    // Isn't called for the whole content of a block or span at once.
+    // Instead, textual contents of blocks and spans can be
+    // sliced into parts so `text` is called multiple times for it
+    pub fn text(self: *@This(), text_type: TextType, data: []const u8) void {}
 };
 
 const parser: Parser(Visitor) = .init(.{ .user_field = ... }, flags);
 
-// This may return an error from a callback,
+// May return an error from a callback,
 // which stops the parsing completely
 try parser.parse("# *Hello*");
 ```
