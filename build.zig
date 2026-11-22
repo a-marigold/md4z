@@ -30,6 +30,11 @@ pub fn build(b: *Build) void {
 
     const test_exe = b.addTest(.{ .root_module = root_mod });
 
+    const run_test_exe = b.addRunArtifact(test_exe);
+
+    const test_step = b.step("test", "Build on save");
+    test_step.dependOn(&run_test_exe.step);
+
     const check_step = b.step("check", "Build on save");
     check_step.dependOn(&test_exe.step);
 }
