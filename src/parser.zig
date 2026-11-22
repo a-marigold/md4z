@@ -49,7 +49,7 @@ pub fn Parser(comptime Visitor: type) type {
 
         /// Not only `FLAG_*` can be used as `flags`,
         /// but also `DIALECT_COMMONMARK` and `DIALECT_GITHUB`.
-        pub fn init(visitor: *Visitor, flags: u32) @This() {
+        pub fn init(visitor: *Visitor, flags: Flags) @This() {
             return .{
                 .inner = .{
                     .enter_block = enterBlock,
@@ -58,7 +58,7 @@ pub fn Parser(comptime Visitor: type) type {
                     .leave_span = leaveSpan,
                     .text = text,
 
-                    .flags = flags,
+                    .flags = @backingInt(flags),
 
                     // Reserved and must be set to zero
                     .abi_version = 0,
@@ -101,10 +101,10 @@ pub fn Parser(comptime Visitor: type) type {
 
         /// Parses Markdown of `input` and calls the visitor callbacks.
         ///
-        /// If the `md4c` parser fails, `ParseError.ParseFailed` is returned.
-        ///
-        /// If a visitor callback returns an error,
+        /// If a visitor callback returns an error (`CallbackError`),
         /// returns that error and stops parsing completely.
+        ///
+        /// If the `md4c` parser fails, `ParseError.ParseFailed` is returned.
         pub inline fn parse(self: *@This(), input: []const u8) (ParseError || CallbackError)!void {
             const result = md4c.md_parse(input.ptr, input.len, &self.inner, self.visitor);
 
@@ -153,35 +153,36 @@ pub fn Parser(comptime Visitor: type) type {
     };
 }
 
-pub const FLAG_COLLAPSEWHITESPACE = md4c.MD_FLAG_COLLAPSEWHITESPACE;
-pub const FLAG_PERMISSIVEATXHEADERS = md4c.MD_FLAG_PERMISSIVEATXHEADERS;
-pub const FLAG_PERMISSIVEURLAUTOLINKS = md4c.MD_FLAG_PERMISSIVEURLAUTOLINKS;
-pub const FLAG_PERMISSIVEEMAILAUTOLINKS = md4c.MD_FLAG_PERMISSIVEEMAILAUTOLINKS;
-pub const FLAG_NOINDENTEDCODEBLOCKS = md4c.MD_FLAG_NOINDENTEDCODEBLOCKS;
-pub const FLAG_NOHTMLBLOCKS = md4c.MD_FLAG_NOHTMLBLOCKS;
-pub const FLAG_NOHTMLSPANS = md4c.MD_FLAG_NOHTMLSPANS;
-pub const FLAG_TABLES = md4c.MD_FLAG_TABLES;
-pub const FLAG_STRIKETHROUGH = md4c.MD_FLAG_STRIKETHROUGH;
-pub const FLAG_PERMISSIVEWWWAUTOLINKS = md4c.MD_FLAG_PERMISSIVEWWWAUTOLINKS;
-pub const FLAG_TASKLISTS = md4c.MD_FLAG_TASKLISTS;
-pub const FLAG_LATEXMATHSPANS = md4c.MD_FLAG_LATEXMATHSPANS;
-pub const FLAG_WIKILINKS = md4c.MD_FLAG_WIKILINKS;
-pub const FLAG_UNDERLINE = md4c.MD_FLAG_UNDERLINE;
-pub const FLAG_HARD_SOFT_BREAKS = md4c.MD_FLAG_HARD_SOFT_BREAKS;
-pub const FLAG_SPOILERS = md4c.MD_FLAG_SPOILERS;
-pub const FLAG_SUPERSCRIPTS = md4c.MD_FLAG_SUPERSCRIPTS;
-pub const FLAG_SUBSCRIPTS = md4c.MD_FLAG_SUBSCRIPTS;
-pub const FLAG_ADMONITIONS = md4c.MD_FLAG_ADMONITIONS;
-pub const FLAG_FOOTNOTES = md4c.MD_FLAG_FOOTNOTES;
-pub const FLAG_HIGHLIGHT = md4c.MD_FLAG_HIGHLIGHT;
-pub const FLAG_PRESERVEBLANKLINES = md4c.MD_FLAG_PRESERVEBLANKLINES;
-pub const FLAG_INSERT = md4c.MD_FLAG_INSERT;
+pub const Flags = packed struct(u32) {
+    collapse_whitespace: bool = false,
+    permissive_atx_headers: bool = false,
+    permissive_url_autolinks: bool = false,
+    permissive_email_autolinks: bool = false,
+    no_indented_code_blocks: bool = false,
+    no_html_blocks: bool = false,
+    no_html_spans: bool = false,
+    tables: bool = false,
+    strike_through: bool = false,
+    permissive_www_autolinks: bool = false,
+    tasklists: bool = false,
+    latex_math_spans: bool = false,
+    wikilinks: bool = false,
+    underline: bool = false,
+    hard_soft_breaks: bool = false,
+    spoilers: bool = false,
+    superscripts: bool = false,
+    subscripts: bool = false,
+    admonitions: bool = false,
+    footnotes: bool = false,
+    highlight: bool = false,
+    preserve_blank_lines: bool = false,
+    insert: bool = false,
 
-pub const FLAG_PERMISSIVEAUTOLINKS = md4c.MD_FLAG_PERMISSIVEAUTOLINKS;
-pub const FLAG_NOHTML = md4c.MD_FLAG_NOHTML;
+    _: u23 = 0,
+};
 
-pub const DIALECT_COMMONMARK = md4c.MD_DIALECT_COMMONMARK;
-pub const DIALECT_GITHUB = md4c.MD_DIALECT_GITHUB;
+pub const DIALECT_COMMONMARK: Flags = @fromBackingInt(md4c.MD_DIALECT_COMMONMARK);
+pub const DIALECT_GITHUB: Flags = @fromBackingInt(md4c.MD_DIALECT_GITHUB);
 
 /// `parse` function returns this if
 /// the `md4c` parser fails for some reason.
@@ -270,14 +271,14 @@ pub const Span = union {
 };
 
 pub const TextType = enum(md4c.MD_TEXTTYPE) {
-    Normal = 0,
-    NullChar = 1,
-    HardLineBreak = 2,
-    LineBreak = 3,
-    Entity = 4,
-    Code = 5,
-    Html = 6,
-    LatexMath = 7,
+    Normal = md4c.MD_TEXT_NORMAL,
+    NullChar = md4c.MD_TEXT_NULLCHAR,
+    HardLineBreak = md4c.MD_TEXT_BR,
+    LineBreak = md4c.MD_TEXT_SOFTBR,
+    Entity = md4c.MD_TEXT_ENTITY,
+    Code = md4c.MD_TEXT_CODE,
+    Html = md4c.MD_TEXT_HTML,
+    LatexMath = md4c.MD_TEXT_LATEXMATH,
 };
 
 test {}
