@@ -1,3 +1,5 @@
+const std = @import("std");
+const mem = std.mem;
 const md4c = @import("md4c");
 
 /// `Visitor` is a namespace (struct, enum, etc) with public function declarations (callbacks).
@@ -18,17 +20,17 @@ const md4c = @import("md4c");
 ///
 ///     // It's guaranteed that `leaveBlock` is called
 ///     // for every span that appears in `enterBlock`
-///     // (if there are no errors)
+///     // (if there is no error)
 ///     pub fn enterBlock(self: *@This(), block_type: BlockType, block: *const Block) SomeError!void {}
 ///     pub fn leaveBlock(self: *@This(), block_type: BlockType, block: *const Block) !void {}
 ///
 ///     // It's guaranteed that `leaveSpan` is called
 ///     // for every span that appears in `enterSpan`
-///     // (if there are no errors)
+///     // (if there is no error)
 ///     pub fn enterSpan(self: *@This(), span_type: SpanType, block: *const Span) void {}
 ///     pub fn leaveSpan(self: *@This(), span_type: SpanType, block: *const Span) void {}
 ///
-///     // Isn't called for the whole content of a block or span at once.
+///     // Isn't called for the whole content of a block or a span at once.
 ///     // Instead, textual contents of blocks and spans can be
 ///     // sliced into parts so `text` is called multiple times for it
 ///     pub fn text(self: *@This(), text_type: TextType, data: []const u8) void {}
@@ -43,11 +45,11 @@ const md4c = @import("md4c");
 pub fn Parser(comptime Visitor: type) type {
     return struct {
         inner: md4c.MD_PARSER,
-        visitor: Visitor,
+        visitor: *Visitor,
 
-        /// Besides `FLAG_` flags, `DIALECT_COMMONMARK` and
-        /// `DIALECT_GITHUB` can be used as `flags`.
-        pub fn init(visitor: Visitor, flags: u32) @This() {
+        /// Not only `FLAG_*` can be used as `flags`,
+        /// but also `DIALECT_COMMONMARK` and `DIALECT_GITHUB`.
+        pub fn init(visitor: *Visitor, flags: u32) @This() {
             return .{
                 .inner = .{
                     .enter_block = enterBlock,
@@ -68,13 +70,43 @@ pub fn Parser(comptime Visitor: type) type {
             };
         }
 
+        /// All possible errors from callbacks that can abort parsing.
+        pub const CallbackError = block: {
+            const visitor_info = switch (@typeInfo(Visitor)) {
+                .@"struct", .@"enum", .@"union", .@"opaque" => |info| info,
+                else => @compileError("Visitor must be a namespace"),
+            };
+
+            var Error: type = error{};
+
+            // Do || (merge) with all errors from callbacks
+            for (visitor_info.decl_names) |decl_name|
+                if (mem.eql(u8, decl_name, "enterBlock") or mem.eql(u8, decl_name, "leaveBlock") or
+                    mem.eql(u8, decl_name, "enterSpan") or mem.eql(u8, decl_name, "leaveSpan") or
+                    mem.eql(u8, decl_name, "text"))
+                {
+                    const callback_info = @typeInfo(@FieldType(Visitor, decl_name)).@"fn";
+
+                    const CallbackReturnType = callback_info.return_type orelse
+                        @compileError(decl_name ++ " callback cannot have a generic return type");
+
+                    switch (@typeInfo(CallbackReturnType)) {
+                        .error_union => |info| Error = Error || info.error_set,
+                        else => {},
+                    }
+                };
+
+            break :block Error;
+        };
+
         /// Parses Markdown of `input` and calls the visitor callbacks.
         ///
         /// If the `md4c` parser fails, `ParseError.ParseFailed` is returned.
         ///
-        /// If a visitor callback returns an error, immediately returns that error.
-        pub inline fn parse(self: *@This(), input: []const u8) (ParseError || anyerror)!void {
-            const result = md4c.md_parse(input.ptr, input.len, &self.inner, &self.visitor);
+        /// If a visitor callback returns an error,
+        /// returns that error and stops parsing completely.
+        pub inline fn parse(self: *@This(), input: []const u8) (ParseError || CallbackError)!void {
+            const result = md4c.md_parse(input.ptr, input.len, &self.inner, self.visitor);
 
             return switch (result) {
                 0 => {},
@@ -84,7 +116,7 @@ pub fn Parser(comptime Visitor: type) type {
         }
 
         fn enterBlock(block_type: md4c.MD_BLOCKTYPE, detail: ?*anyopaque, userdata: ?*anyopaque) callconv(.c) c_int {
-            const visitor: *Visitor = @ptrCast(userdata);
+            const visitor: *Visitor = @ptrCast(@alignCast(userdata.?));
 
             const block: *const Block = @ptrCast(@alignCast(detail));
 
@@ -245,5 +277,7 @@ pub const TextType = enum(md4c.MD_TEXTTYPE) {
     Entity = 4,
     Code = 5,
     Html = 6,
-    LatextMath = 7,
+    LatexMath = 7,
 };
+
+test {}
