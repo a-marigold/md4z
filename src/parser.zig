@@ -1,5 +1,6 @@
 const std = @import("std");
 const mem = std.mem;
+const testing = std.testing;
 const md4c = @import("md4c");
 
 /// `Visitor` is a namespace (struct, enum, etc) with public function declarations (callbacks).
@@ -11,6 +12,8 @@ const md4c = @import("md4c");
 ///
 /// Example:
 /// ```zig
+/// const md4z = @import("md4z");
+///
 /// // Can be any namespace (struct, enum, union, opaque)
 /// const Visitor = struct {
 ///     user_field: SomeType,
@@ -21,22 +24,24 @@ const md4c = @import("md4c");
 ///     // It's guaranteed that `leaveBlock` is called
 ///     // for every span that appears in `enterBlock`
 ///     // (if there is no error)
-///     pub fn enterBlock(self: *@This(), block_type: BlockType, block: *const Block) SomeError!void {}
-///     pub fn leaveBlock(self: *@This(), block_type: BlockType, block: *const Block) !void {}
+///     pub fn enterBlock(self: *@This(), block_type: md4z.BlockType, block: *const md4z.Block) SomeError!void {}
+///     pub fn leaveBlock(self: *@This(), block_type: md4z.BlockType, block: *const md4z.Block) !void {}
 ///
 ///     // It's guaranteed that `leaveSpan` is called
 ///     // for every span that appears in `enterSpan`
 ///     // (if there is no error)
-///     pub fn enterSpan(self: *@This(), span_type: SpanType, block: *const Span) void {}
-///     pub fn leaveSpan(self: *@This(), span_type: SpanType, block: *const Span) void {}
+///     pub fn enterSpan(self: *@This(), span_type: md4z.SpanType, block: *const md4z.Span) void {}
+///     pub fn leaveSpan(self: *@This(), span_type: md4z.SpanType, block: *const md4z.Span) void {}
 ///
 ///     // Isn't called for the whole content of a block or a span at once.
 ///     // Instead, textual contents of blocks and spans can be
 ///     // sliced into parts so `text` is called multiple times for it
-///     pub fn text(self: *@This(), text_type: TextType, data: []const u8) void {}
+///     pub fn text(self: *@This(), text_type: md4z.TextType, data: []const u8) void {}
 /// };
 ///
-/// const parser: Parser(Visitor) = .init(.{ .user_field = ... }, flags);
+/// var visitor: Visitor = .{ .user_field = ... };
+/// const flags: md4z.Flags = .{ .collapse_whitespace = false, ... };
+/// var parser: md4z.Parser(Visitor) = .init(&visitor, flags);
 ///
 /// // May return an error from a callback,
 /// // which stops the parsing completely
@@ -73,7 +78,7 @@ pub fn Parser(comptime Visitor: type) type {
         /// All possible errors from callbacks that can abort parsing.
         pub const CallbackError = block: {
             const visitor_info = switch (@typeInfo(Visitor)) {
-                .@"struct", .@"enum", .@"union", .@"opaque" => |info| info,
+                inline .@"struct", .@"enum", .@"union", .@"opaque" => |info| info,
                 else => @compileError("Visitor must be a namespace"),
             };
 
@@ -85,7 +90,7 @@ pub fn Parser(comptime Visitor: type) type {
                     mem.eql(u8, decl_name, "enterSpan") or mem.eql(u8, decl_name, "leaveSpan") or
                     mem.eql(u8, decl_name, "text"))
                 {
-                    const callback_info = @typeInfo(@FieldType(Visitor, decl_name)).@"fn";
+                    const callback_info = @typeInfo(@TypeOf(@field(Visitor, decl_name))).@"fn";
 
                     const CallbackReturnType = callback_info.return_type orelse
                         @compileError(decl_name ++ " callback cannot have a generic return type");
@@ -108,49 +113,99 @@ pub fn Parser(comptime Visitor: type) type {
         pub inline fn parse(self: *@This(), input: []const u8) (ParseError || CallbackError)!void {
             const result = md4c.md_parse(input.ptr, input.len, &self.inner, self.visitor);
 
-            return switch (result) {
+            switch (result) {
                 0 => {},
-                -1 => ParseError.ParseFailed,
-                else => @errorFromInt(result),
-            };
+                -1 => return ParseError.ParseFailed,
+                else => {
+                    const AnyErrorInt = @Int(.unsigned, @bitSizeOf(anyerror));
+                    const err = @errorFromInt(@as(AnyErrorInt, @intCast(result)));
+                    return @errorCast(err);
+                },
+            }
         }
 
         fn enterBlock(block_type: md4c.MD_BLOCKTYPE, detail: ?*anyopaque, userdata: ?*anyopaque) callconv(.c) c_int {
-            const visitor: *Visitor = @ptrCast(@alignCast(userdata.?));
+            const visitor: *Visitor = @ptrCast(@alignCast(userdata));
 
-            const block: *const Block = @ptrCast(@alignCast(detail));
+            const block = blockFromDetail(block_type, detail);
 
-            visitor.enterBlock(@fromBackingInt(block_type), block) catch |err| return @intFromError(err);
+            visitor.enterBlock(block) catch |err| return @intFromError(err);
+            return 0;
         }
         fn leaveBlock(block_type: md4c.MD_BLOCKTYPE, detail: ?*anyopaque, userdata: ?*anyopaque) callconv(.c) c_int {
-            const visitor: *Visitor = @ptrCast(userdata);
+            const visitor: *Visitor = @ptrCast(@alignCast(userdata));
 
-            const block: *const Block = @ptrCast(@alignCast(detail));
+            const block = blockFromDetail(block_type, detail);
+            visitor.leaveBlock(block) catch |err| return @intFromError(err);
 
-            visitor.leaveBlock(@fromBackingInt(block_type), block) catch |err| return @intFromError(err);
+            return 0;
         }
 
         fn enterSpan(span_type: md4c.MD_SPANTYPE, detail: ?*anyopaque, userdata: ?*anyopaque) callconv(.c) c_int {
-            const visitor: *Visitor = @ptrCast(userdata);
+            const visitor: *Visitor = @ptrCast(@alignCast(userdata));
 
-            const span: *const Span = @ptrCast(@alignCast(detail));
+            const span = spanFromDetail(span_type, detail);
+            visitor.enterSpan(span) catch |err| return @intFromError(err);
 
-            visitor.enterSpan(@fromBackingInt(span_type), span) catch |err| return @intFromError(err);
+            return 0;
         }
         fn leaveSpan(span_type: md4c.MD_SPANTYPE, detail: ?*anyopaque, userdata: ?*anyopaque) callconv(.c) c_int {
-            const visitor: *Visitor = @ptrCast(userdata);
+            const visitor: *Visitor = @ptrCast(@alignCast(userdata));
 
-            const span: *const Span = @ptrCast(@alignCast(detail));
+            const span = spanFromDetail(span_type, detail);
+            visitor.leaveSpan(span) catch |err| return @intFromError(err);
 
-            visitor.leaveSpan(@fromBackingInt(span_type), span) catch |err| return @intFromError(err);
+            return 0;
         }
 
         fn text(text_type: md4c.MD_TEXTTYPE, data: [*c]const md4c.MD_CHAR, size: md4c.MD_SIZE, userdata: ?*anyopaque) callconv(.c) c_int {
-            const visitor: *Visitor = @ptrCast(userdata);
+            const visitor: *Visitor = @ptrCast(@alignCast(userdata));
 
-            visitor.text(@fromBackingInt(text_type), data.?[0..size]) catch |err| return @intFromError(err);
+            visitor.text(@fromBackingInt(text_type), data[0..size]) catch |err| return @intFromError(err);
+
+            return 0;
         }
     };
+}
+
+/// Converts C-pointer `detail` from `md4c` to `Block`.
+inline fn blockFromDetail(block_type: md4c.MD_BLOCKTYPE, detail: ?*anyopaque) Block {
+    const block_type_info = @typeInfo(BlockType).@"enum";
+    const block_info = @typeInfo(Block).@"union";
+
+    inline for (
+        block_type_info.field_values,
+        block_info.field_names,
+        block_info.field_types,
+    ) |field_tag, field_name, FieldType|
+        if (field_tag == block_type)
+            return switch (FieldType) {
+                void => @unionInit(Block, field_name, {}),
+                else => @unionInit(Block, field_name, @ptrCast(@alignCast(detail))),
+            };
+
+    // Unknown `block_type`
+    unreachable;
+}
+
+/// Converts C-pointer `detail` from `md4c` to `Block`.
+inline fn spanFromDetail(span_type: md4c.MD_SPANTYPE, detail: ?*anyopaque) Span {
+    const span_type_info = @typeInfo(SpanType).@"enum";
+    const span_info = @typeInfo(Span).@"union";
+
+    inline for (
+        span_type_info.field_values,
+        span_info.field_names,
+        span_info.field_types,
+    ) |field_tag, field_name, FieldType|
+        if (field_tag == span_type)
+            return switch (FieldType) {
+                void => @unionInit(Span, field_name, {}),
+                else => @unionInit(Span, field_name, @ptrCast(@alignCast(detail))),
+            };
+
+    // Unknown `span_type`
+    unreachable;
 }
 
 pub const Flags = packed struct(u32) {
@@ -178,107 +233,104 @@ pub const Flags = packed struct(u32) {
     preserve_blank_lines: bool = false,
     insert: bool = false,
 
-    _: u23 = 0,
+    _: u9 = 0,
 };
 
 pub const DIALECT_COMMONMARK: Flags = @fromBackingInt(md4c.MD_DIALECT_COMMONMARK);
 pub const DIALECT_GITHUB: Flags = @fromBackingInt(md4c.MD_DIALECT_GITHUB);
 
-/// `parse` function returns this if
-/// the `md4c` parser fails for some reason.
+/// `parse` function returns this in case of critical error in `md4c` parser.
 pub const ParseError = error{ParseFailed};
 
 pub const BlockType = enum(md4c.MD_BLOCKTYPE) {
-    Doc = md4c.MD_BLOCK_DOC,
-    Quote = md4c.MD_BLOCK_QUOTE,
-    UnorderedList = md4c.MD_BLOCK_UL,
-    OrderedList = md4c.MD_BLOCK_OL,
-    ListItem = md4c.MD_BLOCK_LI,
-    HorizontalRule = md4c.MD_BLOCK_HR,
-    Heading = md4c.MD_BLOCK_H,
-    FencedCode = md4c.MD_BLOCK_CODE,
-    Html = md4c.MD_BLOCK_HTML,
-    Paragraph = md4c.MD_BLOCK_P,
-    Table = md4c.MD_BLOCK_TABLE,
-    TableHead = md4c.MD_BLOCK_THEAD,
-    TableBody = md4c.MD_BLOCK_TBODY,
-    TableRow = md4c.MD_BLOCK_TR,
-    TableHeadRow = md4c.MD_BLOCK_TH,
-    TableData = md4c.MD_BLOCK_TD,
-    FootnoteSection = md4c.MD_BLOCK_FOOTNOTE_DEF_SECTION,
-    Footnote = md4c.MD_BLOCK_FOOTNOTE_DEF,
-    Admonition = md4c.MD_BLOCK_ADMONITION,
-    BlankLine = md4c.MD_BLOCK_BLANK,
+    doc = md4c.MD_BLOCK_DOC,
+    quote = md4c.MD_BLOCK_QUOTE,
+    unordered_list = md4c.MD_BLOCK_UL,
+    ordered_list = md4c.MD_BLOCK_OL,
+    list_item = md4c.MD_BLOCK_LI,
+    horizontal_rule = md4c.MD_BLOCK_HR,
+    heading = md4c.MD_BLOCK_H,
+    fenced_code = md4c.MD_BLOCK_CODE,
+    html = md4c.MD_BLOCK_HTML,
+    paragraph = md4c.MD_BLOCK_P,
+    table = md4c.MD_BLOCK_TABLE,
+    table_head = md4c.MD_BLOCK_THEAD,
+    table_body = md4c.MD_BLOCK_TBODY,
+    table_row = md4c.MD_BLOCK_TR,
+    table_head_row = md4c.MD_BLOCK_TH,
+    table_data = md4c.MD_BLOCK_TD,
+    footnote_def_section = md4c.MD_BLOCK_FOOTNOTE_DEF_SECTION,
+    footnote = md4c.MD_BLOCK_FOOTNOTE_DEF,
+    admonition = md4c.MD_BLOCK_ADMONITION,
+    blank_line = md4c.MD_BLOCK_BLANK,
 };
-pub const Block = union {
-    Doc: void,
-    Quote: void,
-    UnorderedList: md4c.MD_BLOCK_UL_DETAIL,
-    OrderedList: md4c.MD_BLOCK_OL_DETAIL,
-    ListItem: md4c.MD_BLOCK_LI_DETAIL,
-    HorizontalRule: void,
-    Heading: md4c.MD_BLOCK_H_DETAIL,
-    FencedCode: md4c.MD_BLOCK_CODE_DETAIL,
-    Html: void,
-    Paragraph: void,
-    Table: md4c.MD_BLOCK_TABLE_DETAIL,
-    TableHead: void,
-    TableBody: void,
-    TableRow: void,
-    TableHeadRow: void,
-    TableData: md4c.MD_BLOCK_TD_DETAIL,
-    FootnoteSection: void,
-    Footnote: md4c.MD_BLOCK_FOOTNOTE_DEF_DETAIL,
-    Admonition: md4c.MD_BLOCK_ADMONITION_DETAIL,
-    BlankLine: md4c.MD_BLOCK_BLANK_DETAIL,
+pub const Block = union(BlockType) {
+    doc: void,
+    quote: void,
+    unordered_list: *const md4c.MD_BLOCK_UL_DETAIL,
+    ordered_list: *const md4c.MD_BLOCK_OL_DETAIL,
+    list_item: *const md4c.MD_BLOCK_LI_DETAIL,
+    horizontal_rule: void,
+    heading: *const md4c.MD_BLOCK_H_DETAIL,
+    fenced_code: *const md4c.MD_BLOCK_CODE_DETAIL,
+    html: void,
+    paragraph: void,
+    table: *const md4c.MD_BLOCK_TABLE_DETAIL,
+    table_head: void,
+    table_body: void,
+    table_row: void,
+    table_head_row: void,
+    table_data: *const md4c.MD_BLOCK_TD_DETAIL,
+    footnote_def_section: void,
+    footnote: *const md4c.MD_BLOCK_FOOTNOTE_DEF_DETAIL,
+    admonition: *const md4c.MD_BLOCK_ADMONITION_DETAIL,
+    blank_line: *const md4c.MD_BLOCK_BLANK_DETAIL,
 };
 
 pub const SpanType = enum(md4c.MD_SPANTYPE) {
-    Emphasis = md4c.MD_SPAN_EM,
-    Strong = md4c.MD_SPAN_STRONG,
-    Link = md4c.MD_SPAN_A,
-    Img = md4c.MD_SPAN_IMG,
-    Code = md4c.MD_SPAN_CODE,
-    Insert = md4c.MD_SPAN_INS,
-    Delete = md4c.MD_SPAN_DEL,
-    LatexMath = md4c.MD_SPAN_LATEXMATH,
-    LatexMathDisplay = md4c.MD_SPAN_LATEXMATH_DISPLAY,
-    WikiLink = md4c.MD_SPAN_WIKILINK,
-    Underline = md4c.MD_SPAN_U,
-    Spoiler = md4c.MD_SPAN_SPOILER,
-    SuperScript = md4c.MD_SPAN_SUPERSCRIPT,
-    SubScript = md4c.MD_SPAN_SUBSCRIPT,
-    FootnoteRef = md4c.MD_SPAN_FOOTNOTE_REF,
-    Mark = md4c.MD_SPAN_MARK,
+    emphasis = md4c.MD_SPAN_EM,
+    strong = md4c.MD_SPAN_STRONG,
+    link = md4c.MD_SPAN_A,
+    img = md4c.MD_SPAN_IMG,
+    code = md4c.MD_SPAN_CODE,
+    insert = md4c.MD_SPAN_INS,
+    delete = md4c.MD_SPAN_DEL,
+    latex_math = md4c.MD_SPAN_LATEXMATH,
+    latex_math_display = md4c.MD_SPAN_LATEXMATH_DISPLAY,
+    wiki_link = md4c.MD_SPAN_WIKILINK,
+    underline = md4c.MD_SPAN_U,
+    spoiler = md4c.MD_SPAN_SPOILER,
+    superscript = md4c.MD_SPAN_SUPERSCRIPT,
+    subscript = md4c.MD_SPAN_SUBSCRIPT,
+    footnote_ref = md4c.MD_SPAN_FOOTNOTE_REF,
+    mark = md4c.MD_SPAN_MARK,
 };
-pub const Span = union {
-    Emphasis: void,
-    Strong: void,
-    Link: md4c.MD_SPAN_A_DETAIL,
-    Img: md4c.MD_SPAN_IMG_DETAIL,
-    Code: void,
-    Insert: void,
-    Delete: void,
-    LatexMath: void,
-    LatexMathDisplay: void,
-    WikiLink: md4c.MD_SPAN_WIKILINK_DETAIL,
-    Underline: void,
-    Spoiler: void,
-    SuperScript: void,
-    SubScript: void,
-    FootnoteRef: md4c.MD_SPAN_FOOTNOTE_REF_DETAIL,
-    Mark: void,
+pub const Span = union(SpanType) {
+    emphasis: void,
+    strong: void,
+    link: *const md4c.MD_SPAN_A_DETAIL,
+    img: *const md4c.MD_SPAN_IMG_DETAIL,
+    code: void,
+    insert: void,
+    delete: void,
+    latex_math: void,
+    latex_math_display: void,
+    wiki_link: *const md4c.MD_SPAN_WIKILINK_DETAIL,
+    underline: void,
+    spoiler: void,
+    superscript: void,
+    subscript: void,
+    footnote_ref: *const md4c.MD_SPAN_FOOTNOTE_REF_DETAIL,
+    mark: void,
 };
 
 pub const TextType = enum(md4c.MD_TEXTTYPE) {
-    Normal = md4c.MD_TEXT_NORMAL,
-    NullChar = md4c.MD_TEXT_NULLCHAR,
-    HardLineBreak = md4c.MD_TEXT_BR,
-    LineBreak = md4c.MD_TEXT_SOFTBR,
-    Entity = md4c.MD_TEXT_ENTITY,
-    Code = md4c.MD_TEXT_CODE,
-    Html = md4c.MD_TEXT_HTML,
-    LatexMath = md4c.MD_TEXT_LATEXMATH,
+    normal = md4c.MD_TEXT_NORMAL,
+    null_char = md4c.MD_TEXT_NULLCHAR,
+    hard_line_break = md4c.MD_TEXT_BR,
+    line_break = md4c.MD_TEXT_SOFTBR,
+    entity = md4c.MD_TEXT_ENTITY,
+    code = md4c.MD_TEXT_CODE,
+    html = md4c.MD_TEXT_HTML,
+    latex_math = md4c.MD_TEXT_LATEXMATH,
 };
-
-test {}
