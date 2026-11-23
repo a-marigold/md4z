@@ -111,14 +111,14 @@ pub fn Parser(comptime Visitor: type) type {
         ///
         /// If the `md4c` parser fails, `ParseError.ParseFailed` is returned.
         pub inline fn parse(self: *@This(), input: []const u8) (ParseError || CallbackError)!void {
-            const result = md4c.md_parse(input.ptr, input.len, &self.inner, self.visitor);
+            const errno = md4c.md_parse(input.ptr, input.len, &self.inner, self.visitor);
 
-            switch (result) {
+            switch (errno) {
                 0 => {},
                 -1 => return ParseError.ParseFailed,
                 else => {
                     const AnyErrorInt = @Int(.unsigned, @bitSizeOf(anyerror));
-                    const err = @errorFromInt(@as(AnyErrorInt, @intCast(result)));
+                    const err = @errorFromInt(@as(AnyErrorInt, @intCast(errno)));
                     return @errorCast(err);
                 },
             }
@@ -168,6 +168,41 @@ pub fn Parser(comptime Visitor: type) type {
     };
 }
 
+/// `parse` function returns this in
+/// case of critical error in `md4c` parser.
+pub const ParseError = error{ParseFailed};
+
+pub const Flags = packed struct(u32) {
+    collapse_whitespace: bool = false,
+    permissive_atx_headers: bool = false,
+    permissive_url_autolinks: bool = false,
+    permissive_email_autolinks: bool = false,
+    no_indented_code_blocks: bool = false,
+    no_html_blocks: bool = false,
+    no_html_spans: bool = false,
+    tables: bool = false,
+    strike_through: bool = false,
+    permissive_www_autolinks: bool = false,
+    tasklists: bool = false,
+    latex_math_spans: bool = false,
+    wikilinks: bool = false,
+    underline: bool = false,
+    hard_soft_breaks: bool = false,
+    spoilers: bool = false,
+    superscripts: bool = false,
+    subscripts: bool = false,
+    admonitions: bool = false,
+    footnotes: bool = false,
+    highlight: bool = false,
+    preserve_blank_lines: bool = false,
+    insert: bool = false,
+
+    _: u9 = 0,
+};
+
+pub const DIALECT_COMMONMARK: Flags = @fromBackingInt(md4c.MD_DIALECT_COMMONMARK);
+pub const DIALECT_GITHUB: Flags = @fromBackingInt(md4c.MD_DIALECT_GITHUB);
+
 /// Converts C-pointer `detail` from `md4c` to `Block`.
 inline fn blockFromDetail(block_type: md4c.MD_BLOCKTYPE, detail: ?*anyopaque) Block {
     const block_type_info = @typeInfo(BlockType).@"enum";
@@ -207,40 +242,6 @@ inline fn spanFromDetail(span_type: md4c.MD_SPANTYPE, detail: ?*anyopaque) Span 
     // Unknown `span_type`
     unreachable;
 }
-
-pub const Flags = packed struct(u32) {
-    collapse_whitespace: bool = false,
-    permissive_atx_headers: bool = false,
-    permissive_url_autolinks: bool = false,
-    permissive_email_autolinks: bool = false,
-    no_indented_code_blocks: bool = false,
-    no_html_blocks: bool = false,
-    no_html_spans: bool = false,
-    tables: bool = false,
-    strike_through: bool = false,
-    permissive_www_autolinks: bool = false,
-    tasklists: bool = false,
-    latex_math_spans: bool = false,
-    wikilinks: bool = false,
-    underline: bool = false,
-    hard_soft_breaks: bool = false,
-    spoilers: bool = false,
-    superscripts: bool = false,
-    subscripts: bool = false,
-    admonitions: bool = false,
-    footnotes: bool = false,
-    highlight: bool = false,
-    preserve_blank_lines: bool = false,
-    insert: bool = false,
-
-    _: u9 = 0,
-};
-
-pub const DIALECT_COMMONMARK: Flags = @fromBackingInt(md4c.MD_DIALECT_COMMONMARK);
-pub const DIALECT_GITHUB: Flags = @fromBackingInt(md4c.MD_DIALECT_GITHUB);
-
-/// `parse` function returns this in case of critical error in `md4c` parser.
-pub const ParseError = error{ParseFailed};
 
 pub const BlockType = enum(md4c.MD_BLOCKTYPE) {
     doc = md4c.MD_BLOCK_DOC,
@@ -334,3 +335,71 @@ pub const TextType = enum(md4c.MD_TEXTTYPE) {
     html = md4c.MD_TEXT_HTML,
     latex_math = md4c.MD_TEXT_LATEXMATH,
 };
+
+test "`parse` returns errors from callbacks and stops immediately" {
+    const BlockError = error{SomeBlockFail};
+    const SpanError = error{SomeSpanFail};
+    const TextError = error{SomeTextFail};
+
+    const Visitor = struct {
+        enter_block_return_value: BlockError!void,
+        leave_block_return_value: BlockError!void,
+        enter_span_return_value: SpanError!void,
+        leave_span_return_value: SpanError!void,
+        text_return_value: TextError!void,
+
+        pub fn enterBlock(self: *@This(), _: Block) BlockError!void {
+            return self.enter_block_return_value;
+        }
+        pub fn leaveBlock(self: *@This(), _: Block) BlockError!void {
+            return self.leave_block_return_value;
+        }
+
+        pub fn enterSpan(self: *@This(), _: Span) SpanError!void {
+            return self.enter_span_return_value;
+        }
+        pub fn leaveSpan(self: *@This(), _: Span) SpanError!void {
+            return self.leave_span_return_value;
+        }
+
+        pub fn text(self: *@This(), _: TextType, _: []const u8) TextError!void {
+            return self.text_return_value;
+        }
+    };
+
+    const ParserType = Parser(Visitor);
+
+    const ParseReturnType = @typeInfo(@TypeOf(ParserType.parse)).@"fn".return_type.?;
+    const ParseReturnTypeError = @typeInfo(ParseReturnType).error_union.error_set;
+
+    try testing.expectEqual(ParseReturnTypeError, ParseError || BlockError || SpanError || TextError);
+
+    var visitor: Visitor = undefined;
+    var parser: ParserType = .init(&visitor, .{});
+
+    const cases = .{
+        .{ .field_name = "enter_block_return_value", .err = BlockError.SomeBlockFail },
+        .{ .field_name = "leave_block_return_value", .err = BlockError.SomeBlockFail },
+        .{ .field_name = "enter_span_return_value", .err = SpanError.SomeSpanFail },
+        .{ .field_name = "leave_span_return_value", .err = SpanError.SomeSpanFail },
+        .{ .field_name = "text_return_value", .err = TextError.SomeTextFail },
+    };
+
+    inline for (cases) |case| {
+        visitor = .{
+            .enter_block_return_value = {},
+            .leave_block_return_value = {},
+            .enter_span_return_value = {},
+            .leave_span_return_value = {},
+            .text_return_value = {},
+        };
+        @field(visitor, case.field_name) = case.err;
+
+        const result = parser.parse(
+            \\# **Hello**
+            \\> Quote
+        );
+
+        try testing.expectError(case.err, result);
+    }
+}
