@@ -1,38 +1,18 @@
 const parser = @import("parser.zig");
 
 pub const Parser = parser.Parser;
+pub const ParseError = parser.ParseError;
 pub const BlockType = parser.BlockType;
 pub const Block = parser.Block;
 pub const SpanType = parser.SpanType;
 pub const Span = parser.Span;
 pub const TextType = parser.TextType;
 
-pub const FLAG_COLLAPSEWHITESPACE = parser.FLAG_COLLAPSEWHITESPACE;
-pub const FLAG_PERMISSIVEATXHEADERS = parser.FLAG_PERMISSIVEATXHEADERS;
-pub const FLAG_PERMISSIVEURLAUTOLINKS = parser.FLAG_PERMISSIVEURLAUTOLINKS;
-pub const FLAG_PERMISSIVEEMAILAUTOLINKS = parser.FLAG_PERMISSIVEEMAILAUTOLINKS;
-pub const FLAG_NOINDENTEDCODEBLOCKS = parser.FLAG_NOINDENTEDCODEBLOCKS;
-pub const FLAG_NOHTMLBLOCKS = parser.FLAG_NOHTMLBLOCKS;
-pub const FLAG_NOHTMLSPANS = parser.FLAG_NOHTMLSPANS;
-pub const FLAG_TABLES = parser.FLAG_TABLES;
-pub const FLAG_STRIKETHROUGH = parser.FLAG_STRIKETHROUGH;
-pub const FLAG_PERMISSIVEWWWAUTOLINKS = parser.FLAG_PERMISSIVEWWWAUTOLINKS;
-pub const FLAG_TASKLISTS = parser.FLAG_TASKLISTS;
-pub const FLAG_LATEXMATHSPANS = parser.FLAG_LATEXMATHSPANS;
-pub const FLAG_WIKILINKS = parser.FLAG_WIKILINKS;
-pub const FLAG_UNDERLINE = parser.FLAG_UNDERLINE;
-pub const FLAG_HARD_SOFT_BREAKS = parser.FLAG_HARD_SOFT_BREAKS;
-pub const FLAG_SPOILERS = parser.FLAG_SPOILERS;
-pub const FLAG_SUPERSCRIPTS = parser.FLAG_SUPERSCRIPTS;
-pub const FLAG_SUBSCRIPTS = parser.FLAG_SUBSCRIPTS;
-pub const FLAG_ADMONITIONS = parser.FLAG_ADMONITIONS;
-pub const FLAG_FOOTNOTES = parser.FLAG_FOOTNOTES;
-pub const FLAG_HIGHLIGHT = parser.FLAG_HIGHLIGHT;
-pub const FLAG_PRESERVEBLANKLINES = parser.FLAG_PRESERVEBLANKLINES;
-pub const FLAG_INSERT = parser.FLAG_INSERT;
-
-pub const FLAG_PERMISSIVEAUTOLINKS = parser.FLAG_PERMISSIVEAUTOLINKS;
-pub const FLAG_NOHTML = parser.FLAG_NOHTML;
+pub const Flags = parser.Flags;
 
 pub const DIALECT_COMMONMARK = parser.DIALECT_COMMONMARK;
 pub const DIALECT_GITHUB = parser.DIALECT_GITHUB;
+
+test {
+    _ = &parser;
+}

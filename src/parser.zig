@@ -16,22 +16,22 @@ const md4c = @import("md4c");
 ///
 /// // Can be any namespace (struct, enum, union, opaque)
 /// const Visitor = struct {
-///     user_field: SomeType,
-///     user_field1: SomeType1,
+///     foo: Foo,
+///     bar: *const Bar,
 ///
 ///     // Callbacks can or can not return errors
 ///
 ///     // It's guaranteed that `leaveBlock` is called
 ///     // for every span that appears in `enterBlock`
 ///     // (if there is no error)
-///     pub fn enterBlock(self: *@This(), block_type: md4z.BlockType, block: *const md4z.Block) SomeError!void {}
-///     pub fn leaveBlock(self: *@This(), block_type: md4z.BlockType, block: *const md4z.Block) !void {}
+///     pub fn enterBlock(self: *@This(), block: md4z.Block) SomeError!void {}
+///     pub fn leaveBlock(self: *@This(), block: md4z.Block) !void {}
 ///
 ///     // It's guaranteed that `leaveSpan` is called
 ///     // for every span that appears in `enterSpan`
 ///     // (if there is no error)
-///     pub fn enterSpan(self: *@This(), span_type: md4z.SpanType, block: *const md4z.Span) void {}
-///     pub fn leaveSpan(self: *@This(), span_type: md4z.SpanType, block: *const md4z.Span) void {}
+///     pub fn enterSpan(self: *@This(), span: md4z.Span) void {}
+///     pub fn leaveSpan(self: *@This(), span: md4z.Span) AnotherError!void {}
 ///
 ///     // Isn't called for the whole content of a block or a span at once.
 ///     // Instead, textual contents of blocks and spans can be
@@ -39,7 +39,7 @@ const md4c = @import("md4c");
 ///     pub fn text(self: *@This(), text_type: md4z.TextType, data: []const u8) void {}
 /// };
 ///
-/// var visitor: Visitor = .{ .user_field = ... };
+/// var visitor: Visitor = .{ .foo = ... };
 /// const flags: md4z.Flags = .{ .collapse_whitespace = false, ... };
 /// var parser: md4z.Parser(Visitor) = .init(&visitor, flags);
 ///
@@ -52,8 +52,7 @@ pub fn Parser(comptime Visitor: type) type {
         inner: md4c.MD_PARSER,
         visitor: *Visitor,
 
-        /// Not only `FLAG_*` can be used as `flags`,
-        /// but also `DIALECT_COMMONMARK` and `DIALECT_GITHUB`.
+        /// `DIALECT_COMMONMARK` and `DIALECT_GITHUB` can be used as `flags`.
         pub fn init(visitor: *Visitor, flags: Flags) @This() {
             return .{
                 .inner = .{
@@ -169,32 +168,77 @@ pub fn Parser(comptime Visitor: type) type {
 }
 
 /// `parse` function returns this in
-/// case of critical error in `md4c` parser.
+/// case of a critical error in `md4c` parser.
 pub const ParseError = error{ParseFailed};
 
 pub const Flags = packed struct(u32) {
+    /// In MD_TEXT_NORMAL, collapse non-trivial whitespace into single ' '
     collapse_whitespace: bool = false,
+
+    /// Do not require space in ATX headers ( ###header )
     permissive_atx_headers: bool = false,
+
+    /// Recognize URLs as autolinks even without '<', '>'
     permissive_url_autolinks: bool = false,
+
+    /// Recognize e-mails as autolinks even without '<', '>' and 'mailto:'
     permissive_email_autolinks: bool = false,
+
+    /// Disable indented code blocks. (Only fenced code works.)
     no_indented_code_blocks: bool = false,
+
+    /// Disable raw HTML blocks.
     no_html_blocks: bool = false,
+
+    /// Disable raw HTML (inline).
     no_html_spans: bool = false,
+
+    /// Enable tables extension.
     tables: bool = false,
+
+    /// Enable strikethrough extension.
     strike_through: bool = false,
+
+    /// Enable WWW autolinks (even without any scheme prefix, if they begin with 'www.')
     permissive_www_autolinks: bool = false,
+
+    /// Enable task list extension.
     tasklists: bool = false,
+
+    /// Enable $ and $$ containing LaTeX equations.
     latex_math_spans: bool = false,
+
+    /// Enable wiki links extension.
     wikilinks: bool = false,
+
+    /// Enable underline extension (and disables '_' for normal emphasis).
     underline: bool = false,
+
+    /// Force all soft breaks to act as hard breaks.
     hard_soft_breaks: bool = false,
+
+    /// Enable ||hidden text|| spoiler spans.
     spoilers: bool = false,
+
+    /// Enable ^superscript^ spans.
     superscripts: bool = false,
+
+    /// Enable ~subscript~ spans.
     subscripts: bool = false,
+
+    /// Enable admonitions extension.
     admonitions: bool = false,
+
+    /// Enable [^label] footnote references.
     footnotes: bool = false,
+
+    /// Enable ==highlight== spans.
     highlight: bool = false,
+
+    /// Report blank line runs as MD_BLOCK_BLANK.
     preserve_blank_lines: bool = false,
+
+    /// Enable insert extension.
     insert: bool = false,
 
     _: u9 = 0,
@@ -403,3 +447,5 @@ test "`parse` returns errors from callbacks and stops immediately" {
         try testing.expectError(case.err, result);
     }
 }
+
+test "`parse` result is identical to the original `md4c.md_parse` result" {}
