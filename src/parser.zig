@@ -109,7 +109,7 @@ pub fn Parser(comptime Visitor: type) type {
         /// returns that error and stops parsing completely.
         ///
         /// If the `md4c` parser fails, `ParseError.ParseFailed` is returned.
-        pub inline fn parse(self: *@This(), input: []const u8) (ParseError || CallbackError)!void {
+        pub inline fn parse(self: *const @This(), input: []const u8) (ParseError || CallbackError)!void {
             const errno = md4c.md_parse(input.ptr, input.len, &self.inner, self.visitor);
 
             switch (errno) {
@@ -128,41 +128,49 @@ pub fn Parser(comptime Visitor: type) type {
 
             const block = blockFromDetail(block_type, detail);
 
-            visitor.enterBlock(block) catch |err| return @intFromError(err);
-            return 0;
+            return callVisitor("enterBlock", .{ visitor, block });
         }
         fn leaveBlock(block_type: md4c.MD_BLOCKTYPE, detail: ?*anyopaque, userdata: ?*anyopaque) callconv(.c) c_int {
             const visitor: *Visitor = @ptrCast(@alignCast(userdata));
 
             const block = blockFromDetail(block_type, detail);
-            visitor.leaveBlock(block) catch |err| return @intFromError(err);
 
-            return 0;
+            return callVisitor("leaveBlock", .{ visitor, block });
         }
 
         fn enterSpan(span_type: md4c.MD_SPANTYPE, detail: ?*anyopaque, userdata: ?*anyopaque) callconv(.c) c_int {
             const visitor: *Visitor = @ptrCast(@alignCast(userdata));
 
             const span = spanFromDetail(span_type, detail);
-            visitor.enterSpan(span) catch |err| return @intFromError(err);
 
-            return 0;
+            return callVisitor("enterSpan", .{ visitor, span });
         }
         fn leaveSpan(span_type: md4c.MD_SPANTYPE, detail: ?*anyopaque, userdata: ?*anyopaque) callconv(.c) c_int {
             const visitor: *Visitor = @ptrCast(@alignCast(userdata));
 
             const span = spanFromDetail(span_type, detail);
-            visitor.leaveSpan(span) catch |err| return @intFromError(err);
 
-            return 0;
+            return callVisitor("leaveSpan", .{ visitor, span });
         }
 
         fn text(text_type: md4c.MD_TEXTTYPE, data: [*c]const md4c.MD_CHAR, size: md4c.MD_SIZE, userdata: ?*anyopaque) callconv(.c) c_int {
             const visitor: *Visitor = @ptrCast(@alignCast(userdata));
 
-            visitor.text(@fromBackingInt(text_type), data[0..size]) catch |err| return @intFromError(err);
+            return callVisitor("text", .{
+                visitor,
+                @as(TextType, @fromBackingInt(text_type)),
+                data[0..size],
+            });
+        }
 
-            return 0;
+        /// Returns an errno that can be returned from a raw `md4c` callback.
+        inline fn callVisitor(comptime callback_name: []const u8, args: anytype) c_int {
+            const result = @call(.auto, @field(Visitor, callback_name), args);
+
+            return switch (@typeInfo(result)) {
+                .error_union => result catch |err| @intFromError(err),
+                else => 0,
+            };
         }
     };
 }
