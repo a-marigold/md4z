@@ -2,12 +2,24 @@ const std = @import("std");
 const testing = std.testing;
 const md4c = @import("md4c");
 
-/// `Visitor` is a namespace (struct, enum, etc) with public function declarations (callbacks).
+/// `Visitor` is a namespace (`struct`, `enum`, `union`, `opaque`) with `pub fn` callbacks.
 ///
-/// Callbacks receive a mutable pointer to their visitor.
+/// Callbacks are `enterBlock`, `leaveBlock`, `enterSpan`, `leaveSpan` and `text`.
+///
+/// 1. Block and span generic callbacks receive:
+///    - A mutable pointer to the visitor.
+///    - Block or span, which is `anytype`.
+///      Possible types of it can be found in
+///      `block` and `span` namespaces.
+/// 2. `text` receives:
+///    - A mutable poitner to the visitor.
+///    - `TextType` (e.g `normal` or `code`).
+///    - `data`, which is a **non**-null-terminated slice of text.
 ///
 /// Callbacks can or can not return errors.
 /// If a callback returns an error, `parse` stops and returns that error.
+///
+/// See the example in [README](https://github.com/a-marigold/md4z/blob/main/README.md).
 pub fn Parser(comptime Visitor: type) type {
     return struct {
         inner: md4c.MD_PARSER,
@@ -245,8 +257,19 @@ pub const Flags = packed struct(u32) {
     pub const dialect_github: @This() = @fromBackingInt(md4c.MD_DIALECT_GITHUB);
 };
 
+/// Type declarations of blocks that `enterBlock` and `leaveBlock` receive.
+///
+/// Use `wrap` function of blocks to translate their
+/// low-level `detail` pointer into a high-level struct.
+///
+/// If raw `detail` pointer is used instead of `wrap`,
+/// dereferencing it after the callback finishes is UB.
+///
+/// Blocks that don't have additional info are just `struct {}`:\
+/// `struct {}` instead of `void` to create identity,
+/// so the block type can be used in `switch` as unique prong.
 const block = struct {
-    /// Internal helper for callback wrappers.
+    /// Internal helper for raw `md4c` callbacks in `Parser`.
     const Type = enum(md4c.MD_BLOCKTYPE) {
         // Names are in PascalCase to easily access
         // `block` type declarations (like `FencedCode`)
@@ -273,10 +296,6 @@ const block = struct {
         Admonition = md4c.MD_BLOCK_ADMONITION,
         BlankLine = md4c.MD_BLOCK_BLANK,
     };
-
-    // Empty structs instead of `void`
-    // to create identity, so the types can be
-    // used in `switch` as unique prongs
 
     pub const Doc = struct {};
     pub const Quote = struct {};
@@ -332,8 +351,19 @@ const block = struct {
     };
 };
 
+/// Type declarations of spans that `enterSpan` and `leaveSpan` receive.
+///
+/// Use `wrap` function of spans to translate their
+/// low-level `detail` pointer into a high-level struct.
+///
+/// If raw `detail` pointer is used instead of `wrap`,
+/// dereferencing it after the callback finishes is UB.
+///
+/// Blocks that don't have additional info are just `struct {}`:\
+/// `struct {}` instead of `void` to create identity,
+/// so the span type can be used in `switch` as unique prong.
 const span = struct {
-    /// Internal helper for callback wrappers.
+    /// Internal helper for raw `md4c` callbacks in `Parser`.
     const Type = enum(md4c.MD_SPANTYPE) {
         // Names are in PascalCase to easily access
         // `span` type declarations (like `WikiLink`)
