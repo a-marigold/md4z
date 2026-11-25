@@ -62,8 +62,8 @@ pub fn Parser(comptime Visitor: type) type {
         /// returns that error and stops parsing completely.
         ///
         /// If the `md4c` parser fails, `ParseError.ParseFailed` is returned.
-        pub inline fn parse(self: *const @This(), input: []const u8) (ParseError || CallbackError)!void {
-            const errno = md4c.md_parse(input.ptr, input.len, &self.inner, self.visitor);
+        pub fn parse(self: *const @This(), input: []const u8) (ParseError || CallbackError)!void {
+            const errno = md4c.md_parse(input.ptr, @intCast(input.len), &self.inner, self.visitor);
 
             switch (errno) {
                 0 => {},
@@ -77,85 +77,89 @@ pub fn Parser(comptime Visitor: type) type {
         }
 
         fn enterBlock(block_type: md4c.MD_BLOCKTYPE, detail: ?*anyopaque, userdata: ?*anyopaque) callconv(.c) c_int {
-            const block_tag: block.Type = @fromBackingInt(block_type);
-            switch (block_tag) {
-                inline else => |tag| {
-                    const tag_name = @tagName(tag);
-
-                    const BlockType = @field(block, tag_name);
-                    const block_fields_len = @typeInfo(BlockType).@"struct".field_names.len;
-
-                    const detail_block: BlockType = switch (block_fields_len) {
-                        0 => .{},
-                        1 => .{ .detail = @ptrCast(@alignCast(detail)) },
-                        else => unreachable,
-                    };
-
-                    const visitor: *Visitor = @ptrCast(@alignCast(userdata));
-                    return callVisitor("enterBlock", .{ visitor, detail_block });
-                },
-            }
+            return callBlock("enterBlock", block_type, detail, userdata);
         }
         fn leaveBlock(block_type: md4c.MD_BLOCKTYPE, detail: ?*anyopaque, userdata: ?*anyopaque) callconv(.c) c_int {
-            const block_tag: block.Type = @fromBackingInt(block_type);
-            switch (block_tag) {
-                inline else => |tag| {
-                    const tag_name = @tagName(tag);
-
-                    const BlockType = @field(block, tag_name);
-                    const block_fields_len = @typeInfo(BlockType).@"struct".field_names.len;
-
-                    const detail_block: BlockType = switch (block_fields_len) {
-                        0 => .{},
-                        1 => .{ .detail = @ptrCast(@alignCast(detail)) },
-                        else => unreachable,
-                    };
-
-                    const visitor: *Visitor = @ptrCast(@alignCast(userdata));
-                    return callVisitor("leaveBlock", .{ visitor, detail_block });
-                },
-            }
+            return callBlock("leaveBlock", block_type, detail, userdata);
         }
 
         fn enterSpan(span_type: md4c.MD_SPANTYPE, detail: ?*anyopaque, userdata: ?*anyopaque) callconv(.c) c_int {
-            const span_tag: span.Type = @fromBackingInt(span_type);
-            switch (span_tag) {
-                inline else => |tag| {
-                    const tag_name = @tagName(tag);
-
-                    const visitor: *Visitor = @ptrCast(@alignCast(userdata));
-                    return callVisitor("enterSpan", .{ visitor, @ptrCast(@alignCast(detail)) });
-                },
-            }
+            return callSpan("enterSpan", span_type, detail, userdata);
         }
         fn leaveSpan(span_type: md4c.MD_SPANTYPE, detail: ?*anyopaque, userdata: ?*anyopaque) callconv(.c) c_int {
-            const span_tag: span.Type = @fromBackingInt(span_type);
-            switch (span_tag) {
-                inline else => |tag| {
-                    const tag_name = @tagName(tag);
-
-                    const visitor: *Visitor = @ptrCast(@alignCast(userdata));
-                    return callVisitor("leaveSpan", .{ visitor, @ptrCast(@alignCast(detail)) });
-                },
-            }
+            return callSpan("leaveSpan", span_type, detail, userdata);
         }
 
         fn text(text_type: md4c.MD_TEXTTYPE, data: [*c]const md4c.MD_CHAR, size: md4c.MD_SIZE, userdata: ?*anyopaque) callconv(.c) c_int {
             const visitor: *Visitor = @ptrCast(@alignCast(userdata));
 
             const text_tag: TextType = @fromBackingInt(text_type);
-
             return callVisitor("text", .{ visitor, text_tag, data[0..size] });
         }
 
+        fn callBlock(
+            comptime callback_name: []const u8,
+            block_type: md4c.MD_BLOCKTYPE,
+            detail: ?*anyopaque,
+            userdata: ?*anyopaque,
+        ) c_int {
+            const block_tag: block.Type = @fromBackingInt(block_type);
+
+            switch (block_tag) {
+                inline else => |tag| {
+                    const tag_name = comptime @tagName(tag);
+
+                    const BlockType = @field(block, tag_name);
+                    const block_info = @typeInfo(BlockType).@"struct";
+                    const block_fields_len = block_info.field_names.len;
+
+                    const detail_block: BlockType = switch (block_fields_len) {
+                        0 => .{},
+                        1 => .{ .detail = @ptrCast(@alignCast(detail)) },
+                        else => unreachable,
+                    };
+
+                    const visitor: *Visitor = @ptrCast(@alignCast(userdata));
+                    return callVisitor(callback_name, .{ visitor, detail_block });
+                },
+            }
+        }
+
+        fn callSpan(
+            comptime callback_name: []const u8,
+            span_type: md4c.MD_SPANTYPE,
+            detail: ?*anyopaque,
+            userdata: ?*anyopaque,
+        ) c_int {
+            const span_tag: span.Type = @fromBackingInt(span_type);
+
+            switch (span_tag) {
+                inline else => |tag| {
+                    const tag_name = comptime @tagName(tag);
+
+                    const SpanType = @field(span, tag_name);
+                    const span_info = @typeInfo(SpanType).@"struct";
+                    const span_fields_len = span_info.field_names.len;
+
+                    const detail_span: SpanType = switch (span_fields_len) {
+                        0 => .{},
+                        1 => .{ .detail = @ptrCast(@alignCast(detail)) },
+                        else => unreachable,
+                    };
+
+                    const visitor: *Visitor = @ptrCast(@alignCast(userdata));
+                    return callVisitor(callback_name, .{ visitor, detail_span });
+                },
+            }
+        }
+
         /// Returns an errno that can be returned from a raw `md4c` callback.
-        inline fn callVisitor(comptime callback_name: []const u8, args: anytype) c_int {
+        fn callVisitor(comptime callback_name: []const u8, args: anytype) c_int {
             const result = @call(.auto, @field(Visitor, callback_name), args);
 
-            switch (@typeInfo(@TypeOf(result))) {
-                .error_union => _ = result catch |err| @intFromError(err),
-                else => {},
-            }
+            if (@typeInfo(@TypeOf(result)) == .error_union)
+                result catch |err| return @intFromError(err);
+
             return 0;
         }
     };
@@ -246,7 +250,8 @@ const block = struct {
     const Type = enum(md4c.MD_BLOCKTYPE) {
         // Names are in PascalCase to easily access
         // `block` type declarations (like `FencedCode`)
-        // without enum snake_case convertion
+        // without enum's snake_case convertion
+
         Doc = md4c.MD_BLOCK_DOC,
         Quote = md4c.MD_BLOCK_QUOTE,
         UnorderedList = md4c.MD_BLOCK_UL,
@@ -332,7 +337,7 @@ const span = struct {
     const Type = enum(md4c.MD_SPANTYPE) {
         // Names are in PascalCase to easily access
         // `span` type declarations (like `WikiLink`)
-        // without enum snake_case convertion
+        // without enum's snake_case convertion
 
         Emphasis = md4c.MD_SPAN_EM,
         Strong = md4c.MD_SPAN_STRONG,
