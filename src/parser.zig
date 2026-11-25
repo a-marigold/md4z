@@ -1,5 +1,4 @@
 const std = @import("std");
-const mem = std.mem;
 const testing = std.testing;
 const md4c = @import("md4c");
 
@@ -9,50 +8,12 @@ const md4c = @import("md4c");
 ///
 /// Callbacks can or can not return errors.
 /// If a callback returns an error, `parse` stops and returns that error.
-///
-/// Example:
-/// ```zig
-/// const md4z = @import("md4z");
-///
-/// // Can be any namespace (struct, enum, union, opaque)
-/// const Visitor = struct {
-///     foo: Foo,
-///     bar: *const Bar,
-///
-///     // Callbacks can or can not return errors
-///
-///     // It's guaranteed that `leaveBlock` is called
-///     // for every span that appears in `enterBlock`
-///     // (if there is no error)
-///     pub fn enterBlock(self: *@This(), block: md4z.Block) SomeError!void {}
-///     pub fn leaveBlock(self: *@This(), block: md4z.Block) !void {}
-///
-///     // It's guaranteed that `leaveSpan` is called
-///     // for every span that appears in `enterSpan`
-///     // (if there is no error)
-///     pub fn enterSpan(self: *@This(), span: md4z.Span) void {}
-///     pub fn leaveSpan(self: *@This(), span: md4z.Span) AnotherError!void {}
-///
-///     // Isn't called for the whole content of a block or a span at once.
-///     // Instead, textual contents of blocks and spans can be
-///     // sliced into parts so `text` is called multiple times for it
-///     pub fn text(self: *@This(), text_type: md4z.TextType, data: []const u8) void {}
-/// };
-///
-/// var visitor: Visitor = .{ .foo = ... };
-/// const flags: md4z.Flags = .{ .collapse_whitespace = false, ... };
-/// var parser: md4z.Parser(Visitor) = .init(&visitor, flags);
-///
-/// // May return an error from a callback,
-/// // which stops the parsing completely
-/// try parser.parse("# *Hello*");
-/// ```
 pub fn Parser(comptime Visitor: type) type {
     return struct {
         inner: md4c.MD_PARSER,
         visitor: *Visitor,
 
-        /// `DIALECT_COMMONMARK` and `DIALECT_GITHUB` can be used as `flags`.
+        /// `Flags.dialect_commonmark` and `Flags.dialect_github` can be used as `flags`.
         pub fn init(visitor: *Visitor, flags: Flags) @This() {
             return .{
                 .inner = .{
@@ -76,29 +37,21 @@ pub fn Parser(comptime Visitor: type) type {
 
         /// All possible errors from callbacks that can abort parsing.
         pub const CallbackError = block: {
-            const visitor_info = switch (@typeInfo(Visitor)) {
-                inline .@"struct", .@"enum", .@"union", .@"opaque" => |info| info,
-                else => @compileError("Visitor must be a namespace"),
-            };
-
             var Error: type = error{};
 
             // Do || (merge) with all errors from callbacks
-            for (visitor_info.decl_names) |decl_name|
-                if (mem.eql(u8, decl_name, "enterBlock") or mem.eql(u8, decl_name, "leaveBlock") or
-                    mem.eql(u8, decl_name, "enterSpan") or mem.eql(u8, decl_name, "leaveSpan") or
-                    mem.eql(u8, decl_name, "text"))
-                {
-                    const callback_info = @typeInfo(@TypeOf(@field(Visitor, decl_name))).@"fn";
+            for (.{ "enterBlock", "leaveBlock", "enterSpan", "leaveSpan", "text" }) |decl_name| {
+                const callback = @field(Visitor, decl_name);
+                const callback_info = @typeInfo(@TypeOf(callback)).@"fn";
 
-                    const CallbackReturnType = callback_info.return_type orelse
-                        @compileError(decl_name ++ " callback cannot have a generic return type");
+                const CallbackReturnType = callback_info.return_type orelse
+                    @compileError(decl_name ++ " callback cannot have a generic return type");
 
-                    switch (@typeInfo(CallbackReturnType)) {
-                        .error_union => |info| Error = Error || info.error_set,
-                        else => {},
-                    }
-                };
+                switch (@typeInfo(CallbackReturnType)) {
+                    .error_union => |info| Error = Error || info.error_set,
+                    else => {},
+                }
+            }
 
             break :block Error;
         };
@@ -124,53 +77,86 @@ pub fn Parser(comptime Visitor: type) type {
         }
 
         fn enterBlock(block_type: md4c.MD_BLOCKTYPE, detail: ?*anyopaque, userdata: ?*anyopaque) callconv(.c) c_int {
-            const visitor: *Visitor = @ptrCast(@alignCast(userdata));
+            const block_tag: block.Type = @fromBackingInt(block_type);
+            switch (block_tag) {
+                inline else => |tag| {
+                    const tag_name = @tagName(tag);
 
-            const block = blockFromDetail(block_type, detail);
+                    const BlockType = @field(block, tag_name);
+                    const block_fields_len = @typeInfo(BlockType).@"struct".field_names.len;
 
-            return callVisitor("enterBlock", .{ visitor, block });
+                    const detail_block: BlockType = switch (block_fields_len) {
+                        0 => .{},
+                        1 => .{ .detail = @ptrCast(@alignCast(detail)) },
+                        else => unreachable,
+                    };
+
+                    const visitor: *Visitor = @ptrCast(@alignCast(userdata));
+                    return callVisitor("enterBlock", .{ visitor, detail_block });
+                },
+            }
         }
         fn leaveBlock(block_type: md4c.MD_BLOCKTYPE, detail: ?*anyopaque, userdata: ?*anyopaque) callconv(.c) c_int {
-            const visitor: *Visitor = @ptrCast(@alignCast(userdata));
+            const block_tag: block.Type = @fromBackingInt(block_type);
+            switch (block_tag) {
+                inline else => |tag| {
+                    const tag_name = @tagName(tag);
 
-            const block = blockFromDetail(block_type, detail);
+                    const BlockType = @field(block, tag_name);
+                    const block_fields_len = @typeInfo(BlockType).@"struct".field_names.len;
 
-            return callVisitor("leaveBlock", .{ visitor, block });
+                    const detail_block: BlockType = switch (block_fields_len) {
+                        0 => .{},
+                        1 => .{ .detail = @ptrCast(@alignCast(detail)) },
+                        else => unreachable,
+                    };
+
+                    const visitor: *Visitor = @ptrCast(@alignCast(userdata));
+                    return callVisitor("leaveBlock", .{ visitor, detail_block });
+                },
+            }
         }
 
         fn enterSpan(span_type: md4c.MD_SPANTYPE, detail: ?*anyopaque, userdata: ?*anyopaque) callconv(.c) c_int {
-            const visitor: *Visitor = @ptrCast(@alignCast(userdata));
+            const span_tag: span.Type = @fromBackingInt(span_type);
+            switch (span_tag) {
+                inline else => |tag| {
+                    const tag_name = @tagName(tag);
 
-            const span = spanFromDetail(span_type, detail);
-
-            return callVisitor("enterSpan", .{ visitor, span });
+                    const visitor: *Visitor = @ptrCast(@alignCast(userdata));
+                    return callVisitor("enterSpan", .{ visitor, @ptrCast(@alignCast(detail)) });
+                },
+            }
         }
         fn leaveSpan(span_type: md4c.MD_SPANTYPE, detail: ?*anyopaque, userdata: ?*anyopaque) callconv(.c) c_int {
-            const visitor: *Visitor = @ptrCast(@alignCast(userdata));
+            const span_tag: span.Type = @fromBackingInt(span_type);
+            switch (span_tag) {
+                inline else => |tag| {
+                    const tag_name = @tagName(tag);
 
-            const span = spanFromDetail(span_type, detail);
-
-            return callVisitor("leaveSpan", .{ visitor, span });
+                    const visitor: *Visitor = @ptrCast(@alignCast(userdata));
+                    return callVisitor("leaveSpan", .{ visitor, @ptrCast(@alignCast(detail)) });
+                },
+            }
         }
 
         fn text(text_type: md4c.MD_TEXTTYPE, data: [*c]const md4c.MD_CHAR, size: md4c.MD_SIZE, userdata: ?*anyopaque) callconv(.c) c_int {
             const visitor: *Visitor = @ptrCast(@alignCast(userdata));
 
-            return callVisitor("text", .{
-                visitor,
-                @as(TextType, @fromBackingInt(text_type)),
-                data[0..size],
-            });
+            const text_tag: TextType = @fromBackingInt(text_type);
+
+            return callVisitor("text", .{ visitor, text_tag, data[0..size] });
         }
 
         /// Returns an errno that can be returned from a raw `md4c` callback.
         inline fn callVisitor(comptime callback_name: []const u8, args: anytype) c_int {
             const result = @call(.auto, @field(Visitor, callback_name), args);
 
-            return switch (@typeInfo(result)) {
-                .error_union => result catch |err| @intFromError(err),
-                else => 0,
-            };
+            switch (@typeInfo(@TypeOf(result))) {
+                .error_union => _ = result catch |err| @intFromError(err),
+                else => {},
+            }
+            return 0;
         }
     };
 }
@@ -250,131 +236,157 @@ pub const Flags = packed struct(u32) {
     insert: bool = false,
 
     _: u9 = 0,
+
+    pub const dialect_commonmark: @This() = @fromBackingInt(md4c.MD_DIALECT_COMMONMARK);
+    pub const dialect_github: @This() = @fromBackingInt(md4c.MD_DIALECT_GITHUB);
 };
 
-pub const DIALECT_COMMONMARK: Flags = @fromBackingInt(md4c.MD_DIALECT_COMMONMARK);
-pub const DIALECT_GITHUB: Flags = @fromBackingInt(md4c.MD_DIALECT_GITHUB);
+const block = struct {
+    /// Internal helper for callback wrappers.
+    const Type = enum(md4c.MD_BLOCKTYPE) {
+        // Names are in PascalCase to easily access
+        // `block` type declarations (like `FencedCode`)
+        // without enum snake_case convertion
+        Doc = md4c.MD_BLOCK_DOC,
+        Quote = md4c.MD_BLOCK_QUOTE,
+        UnorderedList = md4c.MD_BLOCK_UL,
+        OrderedList = md4c.MD_BLOCK_OL,
+        ListItem = md4c.MD_BLOCK_LI,
+        HorizontalRule = md4c.MD_BLOCK_HR,
+        Heading = md4c.MD_BLOCK_H,
+        FencedCodeBlock = md4c.MD_BLOCK_CODE,
+        Html = md4c.MD_BLOCK_HTML,
+        Paragraph = md4c.MD_BLOCK_P,
+        Table = md4c.MD_BLOCK_TABLE,
+        TableHead = md4c.MD_BLOCK_THEAD,
+        TableBody = md4c.MD_BLOCK_TBODY,
+        TableRow = md4c.MD_BLOCK_TR,
+        TableHeadRow = md4c.MD_BLOCK_TH,
+        TableData = md4c.MD_BLOCK_TD,
+        FootnoteDefSection = md4c.MD_BLOCK_FOOTNOTE_DEF_SECTION,
+        Footnote = md4c.MD_BLOCK_FOOTNOTE_DEF,
+        Admonition = md4c.MD_BLOCK_ADMONITION,
+        BlankLine = md4c.MD_BLOCK_BLANK,
+    };
 
-/// Converts C-pointer `detail` from `md4c` to `Block`.
-inline fn blockFromDetail(block_type: md4c.MD_BLOCKTYPE, detail: ?*anyopaque) Block {
-    const block_type_info = @typeInfo(BlockType).@"enum";
-    const block_info = @typeInfo(Block).@"union";
+    // Empty structs instead of `void`
+    // to create identity, so the types can be
+    // used in `switch` as unique prongs
 
-    inline for (
-        block_type_info.field_values,
-        block_info.field_names,
-        block_info.field_types,
-    ) |field_tag, field_name, FieldType|
-        if (field_tag == block_type)
-            return switch (FieldType) {
-                void => @unionInit(Block, field_name, {}),
-                else => @unionInit(Block, field_name, @ptrCast(@alignCast(detail))),
-            };
+    pub const Doc = struct {};
+    pub const Quote = struct {};
 
-    // Unknown `block_type`
-    unreachable;
-}
+    pub const UnorderedList = struct {
+        detail: *const md4c.MD_BLOCK_UL_DETAIL,
+    };
 
-/// Converts C-pointer `detail` from `md4c` to `Block`.
-inline fn spanFromDetail(span_type: md4c.MD_SPANTYPE, detail: ?*anyopaque) Span {
-    const span_type_info = @typeInfo(SpanType).@"enum";
-    const span_info = @typeInfo(Span).@"union";
+    pub const OrderedList = struct {
+        detail: *const md4c.MD_BLOCK_OL_DETAIL,
+    };
 
-    inline for (
-        span_type_info.field_values,
-        span_info.field_names,
-        span_info.field_types,
-    ) |field_tag, field_name, FieldType|
-        if (field_tag == span_type)
-            return switch (FieldType) {
-                void => @unionInit(Span, field_name, {}),
-                else => @unionInit(Span, field_name, @ptrCast(@alignCast(detail))),
-            };
+    pub const ListItem = struct {
+        detail: *const md4c.MD_BLOCK_LI_DETAIL,
+    };
 
-    // Unknown `span_type`
-    unreachable;
-}
+    pub const HorizontalRule = struct {};
 
-pub const BlockType = enum(md4c.MD_BLOCKTYPE) {
-    doc = md4c.MD_BLOCK_DOC,
-    quote = md4c.MD_BLOCK_QUOTE,
-    unordered_list = md4c.MD_BLOCK_UL,
-    ordered_list = md4c.MD_BLOCK_OL,
-    list_item = md4c.MD_BLOCK_LI,
-    horizontal_rule = md4c.MD_BLOCK_HR,
-    heading = md4c.MD_BLOCK_H,
-    fenced_code = md4c.MD_BLOCK_CODE,
-    html = md4c.MD_BLOCK_HTML,
-    paragraph = md4c.MD_BLOCK_P,
-    table = md4c.MD_BLOCK_TABLE,
-    table_head = md4c.MD_BLOCK_THEAD,
-    table_body = md4c.MD_BLOCK_TBODY,
-    table_row = md4c.MD_BLOCK_TR,
-    table_head_row = md4c.MD_BLOCK_TH,
-    table_data = md4c.MD_BLOCK_TD,
-    footnote_def_section = md4c.MD_BLOCK_FOOTNOTE_DEF_SECTION,
-    footnote = md4c.MD_BLOCK_FOOTNOTE_DEF,
-    admonition = md4c.MD_BLOCK_ADMONITION,
-    blank_line = md4c.MD_BLOCK_BLANK,
-};
-pub const Block = union(BlockType) {
-    doc: void,
-    quote: void,
-    unordered_list: *const md4c.MD_BLOCK_UL_DETAIL,
-    ordered_list: *const md4c.MD_BLOCK_OL_DETAIL,
-    list_item: *const md4c.MD_BLOCK_LI_DETAIL,
-    horizontal_rule: void,
-    heading: *const md4c.MD_BLOCK_H_DETAIL,
-    fenced_code: *const md4c.MD_BLOCK_CODE_DETAIL,
-    html: void,
-    paragraph: void,
-    table: *const md4c.MD_BLOCK_TABLE_DETAIL,
-    table_head: void,
-    table_body: void,
-    table_row: void,
-    table_head_row: void,
-    table_data: *const md4c.MD_BLOCK_TD_DETAIL,
-    footnote_def_section: void,
-    footnote: *const md4c.MD_BLOCK_FOOTNOTE_DEF_DETAIL,
-    admonition: *const md4c.MD_BLOCK_ADMONITION_DETAIL,
-    blank_line: *const md4c.MD_BLOCK_BLANK_DETAIL,
+    pub const Heading = struct {
+        detail: *const md4c.MD_BLOCK_H_DETAIL,
+    };
+
+    pub const FencedCodeBlock = struct {
+        detail: *const md4c.MD_BLOCK_CODE_DETAIL,
+    };
+
+    pub const Html = struct {};
+    pub const Paragraph = struct {};
+
+    pub const Table = struct {
+        detail: *const md4c.MD_BLOCK_TABLE_DETAIL,
+    };
+
+    pub const TableHead = struct {};
+    pub const TableBody = struct {};
+    pub const TableRow = struct {};
+    pub const TableHeadRow = struct {};
+
+    pub const TableData = struct {
+        detail: *const md4c.MD_BLOCK_TD_DETAIL,
+    };
+
+    pub const FootnoteDefSection = struct {};
+
+    pub const Footnote = struct {
+        detail: *const md4c.MD_BLOCK_FOOTNOTE_DEF_DETAIL,
+    };
+    pub const Admonition = struct {
+        detail: *const md4c.MD_BLOCK_ADMONITION_DETAIL,
+    };
+    pub const BlankLine = struct {
+        detail: *const md4c.MD_BLOCK_BLANK_DETAIL,
+    };
 };
 
-pub const SpanType = enum(md4c.MD_SPANTYPE) {
-    emphasis = md4c.MD_SPAN_EM,
-    strong = md4c.MD_SPAN_STRONG,
-    link = md4c.MD_SPAN_A,
-    img = md4c.MD_SPAN_IMG,
-    code = md4c.MD_SPAN_CODE,
-    insert = md4c.MD_SPAN_INS,
-    delete = md4c.MD_SPAN_DEL,
-    latex_math = md4c.MD_SPAN_LATEXMATH,
-    latex_math_display = md4c.MD_SPAN_LATEXMATH_DISPLAY,
-    wiki_link = md4c.MD_SPAN_WIKILINK,
-    underline = md4c.MD_SPAN_U,
-    spoiler = md4c.MD_SPAN_SPOILER,
-    superscript = md4c.MD_SPAN_SUPERSCRIPT,
-    subscript = md4c.MD_SPAN_SUBSCRIPT,
-    footnote_ref = md4c.MD_SPAN_FOOTNOTE_REF,
-    mark = md4c.MD_SPAN_MARK,
-};
-pub const Span = union(SpanType) {
-    emphasis: void,
-    strong: void,
-    link: *const md4c.MD_SPAN_A_DETAIL,
-    img: *const md4c.MD_SPAN_IMG_DETAIL,
-    code: void,
-    insert: void,
-    delete: void,
-    latex_math: void,
-    latex_math_display: void,
-    wiki_link: *const md4c.MD_SPAN_WIKILINK_DETAIL,
-    underline: void,
-    spoiler: void,
-    superscript: void,
-    subscript: void,
-    footnote_ref: *const md4c.MD_SPAN_FOOTNOTE_REF_DETAIL,
-    mark: void,
+const span = struct {
+    /// Internal helper for callback wrappers.
+    const Type = enum(md4c.MD_SPANTYPE) {
+        // Names are in PascalCase to easily access
+        // `span` type declarations (like `WikiLink`)
+        // without enum snake_case convertion
+
+        Emphasis = md4c.MD_SPAN_EM,
+        Strong = md4c.MD_SPAN_STRONG,
+        Link = md4c.MD_SPAN_A,
+        Img = md4c.MD_SPAN_IMG,
+        Code = md4c.MD_SPAN_CODE,
+        Insert = md4c.MD_SPAN_INS,
+        Delete = md4c.MD_SPAN_DEL,
+        LatexMath = md4c.MD_SPAN_LATEXMATH,
+        LatexMathDisplay = md4c.MD_SPAN_LATEXMATH_DISPLAY,
+        WikiLink = md4c.MD_SPAN_WIKILINK,
+        Underline = md4c.MD_SPAN_U,
+        Spoiler = md4c.MD_SPAN_SPOILER,
+        Superscript = md4c.MD_SPAN_SUPERSCRIPT,
+        Subscript = md4c.MD_SPAN_SUBSCRIPT,
+        FootnoteRef = md4c.MD_SPAN_FOOTNOTE_REF,
+        Mark = md4c.MD_SPAN_MARK,
+    };
+
+    // Empty structs instead of `void`
+    // to create identity, so the types can be
+    // used in `switch` as unique prongs
+
+    pub const Emphasis = struct {};
+    pub const Strong = struct {};
+
+    pub const Link = struct {
+        detail: *const md4c.MD_SPAN_A_DETAIL,
+    };
+
+    pub const Img = struct {
+        detail: *const md4c.MD_SPAN_IMG_DETAIL,
+    };
+
+    pub const Code = struct {};
+    pub const Insert = struct {};
+    pub const Delete = struct {};
+    pub const LatexMath = struct {};
+    pub const LatexMathDisplay = struct {};
+
+    pub const WikiLink = struct {
+        detail: *const md4c.MD_SPAN_WIKILINK_DETAIL,
+    };
+
+    pub const Underline = struct {};
+    pub const Spoiler = struct {};
+    pub const Superscript = struct {};
+    pub const Subscript = struct {};
+
+    pub const FootnoteRef = struct {
+        detail: *const md4c.MD_SPAN_FOOTNOTE_REF_DETAIL,
+    };
+
+    pub const Mark = struct {};
 };
 
 pub const TextType = enum(md4c.MD_TEXTTYPE) {
@@ -400,17 +412,17 @@ test "`parse` returns errors from callbacks and stops immediately" {
         leave_span_return_value: SpanError!void,
         text_return_value: TextError!void,
 
-        pub fn enterBlock(self: *@This(), _: Block) BlockError!void {
+        pub fn enterBlock(self: *@This(), _: anytype) BlockError!void {
             return self.enter_block_return_value;
         }
-        pub fn leaveBlock(self: *@This(), _: Block) BlockError!void {
+        pub fn leaveBlock(self: *@This(), _: anytype) BlockError!void {
             return self.leave_block_return_value;
         }
 
-        pub fn enterSpan(self: *@This(), _: Span) SpanError!void {
+        pub fn enterSpan(self: *@This(), _: anytype) SpanError!void {
             return self.enter_span_return_value;
         }
-        pub fn leaveSpan(self: *@This(), _: Span) SpanError!void {
+        pub fn leaveSpan(self: *@This(), _: anytype) SpanError!void {
             return self.leave_span_return_value;
         }
 
