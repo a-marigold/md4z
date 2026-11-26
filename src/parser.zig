@@ -453,7 +453,6 @@ const block = struct {
                 .label = .{ .detail = detail.label },
             };
         }
-
         pub const Promoted = struct { id: u32, ref_count: u32, label: Attribute };
     };
     pub const Admonition = struct {
@@ -519,10 +518,29 @@ const span = struct {
 
     pub const Link = struct {
         detail: *const md4c.MD_SPAN_A_DETAIL,
+
+        pub fn promote(self: @This()) Promoted {
+            const detail = self.detail;
+            return .{
+                .href = .{ .detail = detail.href },
+                .title = .{ .detail = detail.title },
+                .is_autolink = detail.is_autolink != 0,
+            };
+        }
+        pub const Promoted = struct { href: Attribute, title: Attribute, is_autolink: bool };
     };
 
     pub const Img = struct {
         detail: *const md4c.MD_SPAN_IMG_DETAIL,
+
+        pub fn promote(self: @This()) Promoted {
+            const detail = self.detail;
+            return .{
+                .src = .{ .detail = detail.src },
+                .title = .{ .detail = detail.title },
+            };
+        }
+        pub const Promoted = struct { src: Attribute, title: Attribute };
     };
 
     pub const Code = struct {};
@@ -533,6 +551,11 @@ const span = struct {
 
     pub const WikiLink = struct {
         detail: *const md4c.MD_SPAN_WIKILINK_DETAIL,
+
+        pub fn promote(self: @This()) Promoted {
+            return .{ .target = .{ .detail = self.detail.target } };
+        }
+        pub const Promoted = struct { taret: Attribute };
     };
 
     pub const Underline = struct {};
@@ -542,6 +565,16 @@ const span = struct {
 
     pub const FootnoteRef = struct {
         detail: *const md4c.MD_SPAN_FOOTNOTE_REF_DETAIL,
+
+        pub fn promote(self: @This()) Promoted {
+            const detail = self.detail;
+            return .{
+                .id = detail.id,
+                .ref_id = detail.ref_id,
+                .label = .{ .detail = detail.label },
+            };
+        }
+        pub const Promoted = struct { id: u32, ref_id: u32, label: Attribute };
     };
 
     pub const Mark = struct {};
