@@ -259,10 +259,10 @@ pub const Flags = packed struct(u32) {
 
 /// Type declarations of blocks that `enterBlock` and `leaveBlock` receive.
 ///
-/// Use `wrap` function of blocks to translate their
+/// Use `promote` function of blocks to translate their
 /// low-level `detail` pointer into a high-level struct.
 ///
-/// If raw `detail` pointer is used instead of `wrap`,
+/// If raw `detail` pointer is used instead of `promote`,
 /// dereferencing it after the callback finishes is UB.
 ///
 /// Blocks that don't have additional info are just `struct {}`:\
@@ -302,24 +302,104 @@ const block = struct {
 
     pub const UnorderedList = struct {
         detail: *const md4c.MD_BLOCK_UL_DETAIL,
+
+        pub fn promote(self: @This()) Promoted {
+            const detail = self.detail;
+            return .{
+                .is_tight = detail.is_tight != 0,
+                .marker = @fromBackingInt(detail.mark),
+            };
+        }
+        pub const Promoted = struct { is_tight: bool, marker: Marker };
+
+        pub const Marker = enum(md4c.MD_CHAR) {
+            @"-" = '-',
+            @"+" = '+',
+            @"*" = '*',
+        };
     };
 
     pub const OrderedList = struct {
         detail: *const md4c.MD_BLOCK_OL_DETAIL,
+
+        pub fn promote(self: @This()) Promoted {
+            const detail = self.detail;
+            return .{
+                .start = detail.start,
+                .is_tight = detail.is_tight != 0,
+                .marker = @fromBackingInt(detail.mark_delimiter),
+            };
+        }
+        pub const Promoted = struct { start: u32, is_tight: bool, delimiter: Delimiter };
+
+        pub const Delimiter = enum(md4c.MD_CHAR) {
+            @"." = '.',
+            @")" = ')',
+        };
     };
 
     pub const ListItem = struct {
         detail: *const md4c.MD_BLOCK_LI_DETAIL,
+
+        pub fn promote(self: @This()) Promoted {
+            const detail = self.detail;
+            return switch (detail.is_task) {
+                false => .{ .item = {} },
+                true => .{
+                    .task = .{
+                        .marker = @fromBackingInt(detail.task_mark),
+                        .offset = detail.task_mark_offset,
+                    },
+                },
+            };
+        }
+        pub const Promoted = union(enum) {
+            item,
+            task: struct { marker: TaskMarker, offset: u32 },
+        };
+
+        pub const TaskMarker = enum(md4c.MD_CHAR) {
+            x = 'x',
+            X = 'X',
+            @" " = ' ',
+        };
     };
 
     pub const HorizontalRule = struct {};
 
     pub const Heading = struct {
         detail: *const md4c.MD_BLOCK_H_DETAIL,
+
+        pub fn promote(self: @This()) Promoted {
+            return .{ .level = self.detail.level };
+        }
+        pub const Promoted = struct { level: u32 };
     };
 
     pub const FencedCodeBlock = struct {
         detail: *const md4c.MD_BLOCK_CODE_DETAIL,
+
+        pub fn promote(self: @This()) Promoted {
+            const detail = self.detail;
+            return .{
+                .info = .{ .detail = detail.info },
+                .lang = .{ .detail = detail.lang },
+                .fence = @fromBackingInt(detail.fence_char),
+            };
+        }
+        pub const Promoted = struct {
+            info: Attribute,
+
+            /// The first substring of `info` attribute.
+            lang: Attribute,
+
+            fence: Fence,
+        };
+
+        pub const Fence = enum(md4c.MD_CHAR) {
+            @"`" = '`',
+            @"~" = '~',
+        };
     };
 
     pub const Html = struct {};
@@ -327,36 +407,79 @@ const block = struct {
 
     pub const Table = struct {
         detail: *const md4c.MD_BLOCK_TABLE_DETAIL,
+
+        pub fn promote(self: @This()) Promoted {
+            const detail = self.detail;
+            return .{
+                .column_count = detail.col_count,
+                .head_row_count = detail.head_row_count,
+                .body_row_count = detail.body_row_count,
+            };
+        }
+        pub const Promoted = struct { column_count: u32, head_row_count: u32, body_row_count: u32 };
     };
 
-    pub const TableHead = struct {};
+    pub const TableHead = struct {
+        detail: *const md4c.MD_BLOCK_TD_DETAIL,
+
+        pub fn promote(self: @This()) Promoted {
+            return .{ .alignment = self.detail.@"align" };
+        }
+        pub const Promoted = struct { alignment: u32 };
+    };
     pub const TableBody = struct {};
     pub const TableRow = struct {};
     pub const TableHeadRow = struct {};
 
     pub const TableData = struct {
         detail: *const md4c.MD_BLOCK_TD_DETAIL,
+
+        pub fn promote(self: @This()) Promoted {
+            return .{ .alignment = self.detail.@"align" };
+        }
+        pub const Promoted = struct { alignment: u32 };
     };
 
     pub const FootnoteDefSection = struct {};
 
     pub const Footnote = struct {
         detail: *const md4c.MD_BLOCK_FOOTNOTE_DEF_DETAIL,
+
+        pub fn promote(self: @This()) Promoted {
+            const detail = self.detail;
+            return .{
+                .id = detail.id,
+                .ref_count = detail.ref_count,
+                .label = .{ .detail = detail.label },
+            };
+        }
+
+        pub const Promoted = struct { id: u32, ref_count: u32, label: Attribute };
     };
     pub const Admonition = struct {
         detail: *const md4c.MD_BLOCK_ADMONITION_DETAIL,
+
+        pub fn promote(self: @This()) Promoted {
+            return .{ .type = .{ .detail = self.detail.type } };
+        }
+        pub const Promoted = struct { type: Attribute };
     };
     pub const BlankLine = struct {
         detail: *const md4c.MD_BLOCK_BLANK_DETAIL,
+
+        pub fn promote(self: @This()) Promoted {
+            return .{ .line_count = self.detail.line_count };
+        }
+        pub const Promoted = struct { line_count: u32 };
     };
 };
 
 /// Type declarations of spans that `enterSpan` and `leaveSpan` receive.
 ///
-/// Use `wrap` function of spans to translate their
+/// Use `promote` function of spans to translate their
 /// low-level `detail` pointer into a high-level struct.
 ///
-/// If raw `detail` pointer is used instead of `wrap`,
+/// If raw `detail` pointer is used instead of `promote`,
 /// dereferencing it after the callback finishes is UB.
 ///
 /// Blocks that don't have additional info are just `struct {}`:\
@@ -422,6 +545,27 @@ const span = struct {
     };
 
     pub const Mark = struct {};
+};
+
+pub const Attribute = struct {
+    detail: md4c.MD_ATTRIBUTE,
+
+    inline fn promote(self: *@This()) Promoted {
+        const detail = self.detail;
+        return .{
+            .text = if (detail.text) |text| text[0..detail.size] else null,
+            .substr_types = @ptrCast(detail.substr_types),
+            .substr_offsets = @ptrCast(detail.substr_offsets),
+        };
+    }
+
+    pub const Promoted = struct {
+        text: ?[]const u8,
+        substr_types: [*]const TextType,
+        substr_offsets: [*]const u32,
+
+        // TODO: iterator
+    };
 };
 
 pub const TextType = enum(md4c.MD_TEXTTYPE) {
