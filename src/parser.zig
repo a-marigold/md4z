@@ -122,22 +122,9 @@ pub fn Parser(comptime Visitor: type) type {
 
             switch (block_tag) {
                 inline else => |tag| {
-                    const tag_name = comptime @tagName(tag);
-
-                    const BlockType = @field(block, tag_name);
-                    const block_info = @typeInfo(BlockType).@"struct";
-                    const block_fields_len = block_info.field_names.len;
-
-                    const detail_block: BlockType = switch (block_fields_len) {
-                        0 => .{},
-                        1 => switch (BlockType) {
-                            block.TableHead => .{ .data = .{ .detail = @ptrCast(@alignCast(detail)) } },
-                            else => .{ .detail = @ptrCast(@alignCast(detail)) },
-                        },
-                        else => unreachable,
-                    };
-
                     const visitor: *Visitor = @ptrCast(@alignCast(userdata));
+                    const detail_block = block.fromType(tag, detail);
+
                     return callVisitor(callback_name, .{ visitor, detail_block });
                 },
             }
@@ -153,19 +140,9 @@ pub fn Parser(comptime Visitor: type) type {
 
             switch (span_tag) {
                 inline else => |tag| {
-                    const tag_name = comptime @tagName(tag);
-
-                    const SpanType = @field(span, tag_name);
-                    const span_info = @typeInfo(SpanType).@"struct";
-                    const span_fields_len = span_info.field_names.len;
-
-                    const detail_span: SpanType = switch (span_fields_len) {
-                        0 => .{},
-                        1 => .{ .detail = @ptrCast(@alignCast(detail)) },
-                        else => unreachable,
-                    };
-
                     const visitor: *Visitor = @ptrCast(@alignCast(userdata));
+                    const detail_span = span.fromType(tag, detail);
+
                     return callVisitor(callback_name, .{ visitor, detail_span });
                 },
             }
@@ -263,19 +240,33 @@ pub const Flags = packed struct(u32) {
     pub const dialect_github: @This() = @fromBackingInt(md4c.MD_DIALECT_GITHUB);
 };
 
+// TODO: list item next line indentation rules
 /// Type declarations of blocks that `enterBlock` and `leaveBlock` receive.
 ///
-/// Use `promote` function of blocks to translate their
+/// - Use `promote` function of blocks to translate their
 /// low-level `detail` pointer into a high-level struct.
-///
-/// If raw `detail` pointer is used instead of `promote`,
-/// dereferencing it after the callback finishes is UB.
+/// - Raw `detail` pointer can be used instead of `promote`.\
+///   Note that dereferencing it after the callback finishes is UB.
 ///
 /// Blocks that don't have additional info are just `struct {}`:\
 /// `struct {}` instead of `void` to create identity,
 /// so callbacks can use the block type in `switch` as unique prong.
-const block = struct {
-    /// Internal helper for raw `md4c` callbacks in `Parser`.
+pub const block = struct {
+    fn fromType(comptime block_type: Type, detail: ?*anyopaque) @field(block, @tagName(block_type)) {
+        const BlockType = @field(block, @tagName(block_type));
+        const block_info = @typeInfo(BlockType).@"struct";
+        const block_fields_len = block_info.field_names.len;
+
+        return switch (block_fields_len) {
+            0 => .{},
+            1 => switch (BlockType) {
+                block.TableHead => .{ .data = .{ .detail = @ptrCast(@alignCast(detail)) } },
+                else => .{ .detail = @ptrCast(@alignCast(detail)) },
+            },
+            else => unreachable,
+        };
+    }
+    /// Internal helper for `fromType`.
     const Type = enum(md4c.MD_BLOCKTYPE) {
         // Names are in PascalCase to easily access
         // `block` type declarations (like `FencedCode`)
@@ -481,17 +472,27 @@ const block = struct {
 
 /// Type declarations of spans that `enterSpan` and `leaveSpan` receive.
 ///
-/// Use `promote` function of spans to translate their
-/// low-level `detail` pointer into a high-level struct.
+/// - Use `promote` function of spans to translate their
+///   low-level `detail` pointer into a high-level struct.
+/// - Raw `detail` pointer can be used instead of `promote`.\
+///   Note that dereferencing it after the callback finishes is UB.
 ///
-/// If raw `detail` pointer is used instead of `promote`,
-/// dereferencing it after the callback finishes is UB.
-///
-/// Blocks that don't have additional info are just `struct {}`:\
+/// Spans that don't have additional info are just `struct {}`:\
 /// `struct {}` instead of `void` to create identity,
 /// so callbacks can use the span type in `switch` as unique prong.
-const span = struct {
-    /// Internal helper for raw `md4c` callbacks in `Parser`.
+pub const span = struct {
+    fn fromType(comptime span_type: Type, detail: ?*anyopaque) @field(span, @tagName(span_type)) {
+        const SpanType = @field(span, @tagName(span_type));
+        const span_info = @typeInfo(SpanType).@"struct";
+        const span_fields_len = span_info.field_names.len;
+
+        return switch (span_fields_len) {
+            0 => .{},
+            1 => .{ .detail = @ptrCast(@alignCast(detail)) },
+            else => unreachable,
+        };
+    }
+    /// Internal helper for `fromType`.
     const Type = enum(md4c.MD_SPANTYPE) {
         // Names are in PascalCase to easily access
         // `span` type declarations (like `WikiLink`)
