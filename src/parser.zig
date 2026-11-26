@@ -267,7 +267,7 @@ pub const Flags = packed struct(u32) {
 ///
 /// Blocks that don't have additional info are just `struct {}`:\
 /// `struct {}` instead of `void` to create identity,
-/// so the block type can be used in `switch` as unique prong.
+/// so callbacks can use the block type in `switch` as unique prong.
 const block = struct {
     /// Internal helper for raw `md4c` callbacks in `Parser`.
     const Type = enum(md4c.MD_BLOCKTYPE) {
@@ -419,14 +419,7 @@ const block = struct {
         pub const Promoted = struct { column_count: u32, head_row_count: u32, body_row_count: u32 };
     };
 
-    pub const TableHead = struct {
-        detail: *const md4c.MD_BLOCK_TD_DETAIL,
-
-        pub fn promote(self: @This()) Promoted {
-            return .{ .alignment = self.detail.@"align" };
-        }
-        pub const Promoted = struct { alignment: u32 };
-    };
+    pub const TableHead = struct { data: TableData };
     pub const TableBody = struct {};
     pub const TableRow = struct {};
     pub const TableHeadRow = struct {};
@@ -435,9 +428,16 @@ const block = struct {
         detail: *const md4c.MD_BLOCK_TD_DETAIL,
 
         pub fn promote(self: @This()) Promoted {
-            return .{ .alignment = self.detail.@"align" };
+            return .{ .alignment = @fromBackingInt(self.detail.@"align") };
         }
-        pub const Promoted = struct { alignment: u32 };
+        pub const Promoted = struct { alignment: Alignment };
+
+        pub const Alignment = enum(md4c.MD_ALIGN) {
+            default = md4c.MD_ALIGN_DEFAULT,
+            left = md4c.MD_ALIGN_LEFT,
+            center = md4c.MD_ALIGN_CENTER,
+            right = md4c.MD_ALIGN_RIGHT,
+        };
     };
 
     pub const FootnoteDefSection = struct {};
@@ -483,7 +483,7 @@ const block = struct {
 ///
 /// Blocks that don't have additional info are just `struct {}`:\
 /// `struct {}` instead of `void` to create identity,
-/// so the span type can be used in `switch` as unique prong.
+/// so callbacks can use the span type in `switch` as unique prong.
 const span = struct {
     /// Internal helper for raw `md4c` callbacks in `Parser`.
     const Type = enum(md4c.MD_SPANTYPE) {
@@ -555,7 +555,7 @@ const span = struct {
         pub fn promote(self: @This()) Promoted {
             return .{ .target = .{ .detail = self.detail.target } };
         }
-        pub const Promoted = struct { taret: Attribute };
+        pub const Promoted = struct { target: Attribute };
     };
 
     pub const Underline = struct {};
