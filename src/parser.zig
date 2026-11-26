@@ -127,7 +127,10 @@ pub fn Parser(comptime Visitor: type) type {
 
                     const detail_block: BlockType = switch (block_fields_len) {
                         0 => .{},
-                        1 => .{ .detail = @ptrCast(@alignCast(detail)) },
+                        1 => switch (BlockType) {
+                            block.TableHead => .{ .data = .{ .detail = @ptrCast(@alignCast(detail)) } },
+                            else => .{ .detail = @ptrCast(@alignCast(detail)) },
+                        },
                         else => unreachable,
                     };
 
@@ -580,24 +583,73 @@ const span = struct {
     pub const Mark = struct {};
 };
 
+/// Appears in:
+/// 1. Fenced code blocks info (lang) strings
+/// 2. Image and Link titles
+/// 3. Footnote labels
+/// 4. Admonition type strings
 pub const Attribute = struct {
     detail: md4c.MD_ATTRIBUTE,
 
     inline fn promote(self: *@This()) Promoted {
         const detail = self.detail;
-        return .{
-            .text = if (detail.text) |text| text[0..detail.size] else null,
-            .substr_types = @ptrCast(detail.substr_types),
-            .substr_offsets = @ptrCast(detail.substr_offsets),
+        return switch (detail.text) {
+            null => .{ .empty = {} },
+            else => .{ .text = .{
+                .data = detail.text[0..detail.size],
+                .substr_types = @ptrCast(detail.substr_types),
+                .substr_offsets = @ptrCast(detail.substr_offsets),
+            } },
         };
     }
 
-    pub const Promoted = struct {
-        text: ?[]const u8,
+    /// In `md4c`, attribute may contain `null`
+    /// in its `text` to represent emptinnes.
+    ///
+    /// So, a union with `empty` and `text` fields is used.
+    pub const Promoted = union(enum) { empty, text: Text };
+
+    /// Iterator over the attribute textual data.
+    ///
+    /// Raw `substr_types` and `substr_offsets` can
+    /// be used instead of `nextSubstr` abstraction.
+    ///
+    /// Invariants:
+    /// - `substr_offsets[0]` is 0
+    /// - `substr_offsets[last_index + 1]` is `data.len` (even if it's 0)
+    pub const Text = struct {
+        data: []const u8,
+
         substr_types: [*]const TextType,
         substr_offsets: [*]const u32,
+        substr_index: usize,
 
-        // TODO: iterator
+        /// Returns substrings of `Text.data`:
+        ///
+        /// `normal`, `entity` or `null_char`.
+        pub fn nextSubstr(self: *@This()) ?Substr {
+            const data = self.data;
+            const offsets = self.substr_offsets;
+
+            const substr_start = offsets[self.substr_index];
+            if (substr_start == data.len) return null;
+
+            self.substr_index += 1;
+            const substr_end = offsets[self.substr_index];
+
+            return .{
+                .type = self.substr_types[self.substr_index],
+                .data = data[substr_start..substr_end],
+            };
+        }
+
+        pub const Substr = struct { type: SubstrType, data: []const u8 };
+
+        const SubstrType = enum(md4c.MD_TEXTTYPE) {
+            normal = TextType.normal,
+            entity = TextType.entity,
+            null_char = TextType.null_char,
+        };
     };
 };
 
