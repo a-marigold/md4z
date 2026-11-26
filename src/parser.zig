@@ -53,6 +53,9 @@ pub fn Parser(comptime Visitor: type) type {
 
             // Do || (merge) with all errors from callbacks
             for (.{ "enterBlock", "leaveBlock", "enterSpan", "leaveSpan", "text" }) |decl_name| {
+                if (!@hasDecl(Visitor, decl_name))
+                    @compileError("`Visitor` must have " ++ decl_name ++ " callback");
+
                 const callback = @field(Visitor, decl_name);
                 const callback_info = @typeInfo(@TypeOf(callback)).@"fn";
 
