@@ -1,5 +1,7 @@
 //! Types of markdown document structure.
 
+const std = @import("std");
+const testing = std.testing;
 const md4c = @import("md4c");
 
 // TODO: list item next line indentation rules:
@@ -14,7 +16,7 @@ const md4c = @import("md4c");
 /// `struct {}` instead of `void` to create identity,
 /// so callbacks can use the block type in `switch` as unique prong.
 pub const block = struct {
-    fn fromType(comptime block_type: Type, detail: ?*anyopaque) @field(block, @tagName(block_type)) {
+    pub fn fromType(comptime block_type: Type, detail: ?*anyopaque) @field(block, @tagName(block_type)) {
         const BlockType = @field(block, @tagName(block_type));
         const block_info = @typeInfo(BlockType).@"struct";
         const block_fields_len = block_info.field_names.len;
@@ -29,10 +31,10 @@ pub const block = struct {
         };
     }
     /// Internal helper for `fromType`.
-    const Type = enum(md4c.MD_BLOCKTYPE) {
+    pub const Type = enum(md4c.MD_BLOCKTYPE) {
         // Names are in PascalCase to easily access
         // `block` type declarations (like `OrderedList`)
-        // without enum's snake_case convertion
+        // without enum's snake_case conversion
 
         Doc = md4c.MD_BLOCK_DOC,
         Quote = md4c.MD_BLOCK_QUOTE,
@@ -249,7 +251,7 @@ pub const block = struct {
 /// `struct {}` instead of `void` to create identity,
 /// so callbacks can use the span type in `switch` as unique prong.
 pub const span = struct {
-    fn fromType(comptime span_type: Type, detail: ?*anyopaque) @field(span, @tagName(span_type)) {
+    pub fn fromType(comptime span_type: Type, detail: ?*anyopaque) @field(span, @tagName(span_type)) {
         const SpanType = @field(span, @tagName(span_type));
         const span_info = @typeInfo(SpanType).@"struct";
         const span_fields_len = span_info.field_names.len;
@@ -261,10 +263,10 @@ pub const span = struct {
         };
     }
     /// Internal helper for `fromType`.
-    const Type = enum(md4c.MD_SPANTYPE) {
+    pub const Type = enum(md4c.MD_SPANTYPE) {
         // Names are in PascalCase to easily access
         // `span` type declarations (like `WikiLink`)
-        // without enum's snake_case convertion
+        // without enum's snake_case conversion
 
         Emphasis = md4c.MD_SPAN_EM,
         Strong = md4c.MD_SPAN_STRONG,
@@ -357,59 +359,64 @@ pub const span = struct {
 };
 
 /// Appears in:
-/// 1. Fenced code blocks info (lang) strings
+/// 1. Fenced code blocks info strings
 /// 2. Image and Link titles
 /// 3. Footnote labels
 /// 4. Admonition type strings
 pub const Attribute = struct {
     detail: md4c.MD_ATTRIBUTE,
 
-    pub fn promote(self: @This()) Promoted {
+    /// May return `null` because Attribute
+    /// in `md4c` may contain `null` in
+    /// its `text` to represent emptiness.
+    pub fn promote(self: @This()) ?Promoted {
         const detail = self.detail;
         return switch (detail.text) {
-            null => .{ .empty = {} },
-            else => .{ .text = .{
+            null => null,
+            else => .{
                 .data = detail.text[0..detail.size],
                 .substr_types = @ptrCast(detail.substr_types),
                 .substr_offsets = @ptrCast(detail.substr_offsets),
                 .substr_index = 0,
-            } },
+            },
         };
     }
 
-    /// In `md4c`, attribute may contain `null`
-    /// in its `text` to represent emptinnes.
-    ///
-    /// So, a union with `empty` and `text` fields is used.
-    pub const Promoted = union(enum) { empty, text: Text };
+    pub const Promoted = struct {
+        data: []const u8,
+        substr_types: [*]const SubstrType,
+        substr_offsets: [*]const u32,
+
+        pub fn iterate(self: @This()) SubstrIterator {
+            return .{ .attr = self, .substr_index = 0 };
+        }
+    };
 
     /// Iterator over the attribute textual data.
     ///
-    /// Raw `substr_types` and `substr_offsets` can
-    /// be used instead of `nextSubstr` abstraction.
+    /// Raw `substr_types` and `substr_offsets` of `Promoted`
+    /// can be used instead of this abstraction.
     ///
     /// Invariants:
-    /// - `substr_offsets[0]` is 0
-    /// - `substr_offsets[last_index + 1]` is `data.len` (even if it's 0)
-    pub const Text = struct {
-        data: []const u8,
-
-        substr_types: [*]const SubstrType,
-        substr_offsets: [*]const u32,
+    /// - `substr_offsets[0] == 0`
+    /// - `substr_offsets[last_index + 1] == data.len` (even if it's 0)
+    pub const SubstrIterator = struct {
+        attr: Promoted,
         substr_index: usize,
 
         /// Returns substrings of `Text.data`:
         ///
         /// `normal`, `entity` or `null_char`.
-        pub fn nextSubstr(self: *@This()) ?Substr {
+        pub fn next(self: *@This()) ?Substr {
             const data = self.data;
             const types = self.substr_types;
             const offsets = self.substr_offsets;
+            const substr_index = self.substr_index;
 
-            const substr_start = offsets[self.substr_index];
+            const substr_start = offsets[substr_index];
             if (substr_start == data.len) return null;
 
-            const substr_type = types[self.substr_index];
+            const substr_type = types[substr_index];
 
             self.substr_index += 1;
             const substr_end = offsets[self.substr_index];
@@ -419,14 +426,13 @@ pub const Attribute = struct {
                 .data = data[substr_start..substr_end],
             };
         }
+    };
 
-        pub const Substr = struct { type: SubstrType, data: []const u8 };
-
-        const SubstrType = enum(md4c.MD_TEXTTYPE) {
-            normal = @backingInt(TextType.normal),
-            entity = @backingInt(TextType.entity),
-            null_char = @backingInt(TextType.null_char),
-        };
+    pub const Substr = struct { type: SubstrType, data: []const u8 };
+    const SubstrType = enum(md4c.MD_TEXTTYPE) {
+        normal = @backingInt(TextType.normal),
+        entity = @backingInt(TextType.entity),
+        null_char = @backingInt(TextType.null_char),
     };
 };
 
@@ -434,9 +440,14 @@ pub const TextType = enum(md4c.MD_TEXTTYPE) {
     normal = md4c.MD_TEXT_NORMAL,
     null_char = md4c.MD_TEXT_NULLCHAR,
     hard_line_break = md4c.MD_TEXT_BR,
-    line_break = md4c.MD_TEXT_SOFTBR,
+    soft_line_break = md4c.MD_TEXT_SOFTBR,
     entity = md4c.MD_TEXT_ENTITY,
     code = md4c.MD_TEXT_CODE,
     html = md4c.MD_TEXT_HTML,
     latex_math = md4c.MD_TEXT_LATEXMATH,
 };
+
+test {
+    testing.refAllDecls(span);
+    testing.refAllDecls(block);
+}
