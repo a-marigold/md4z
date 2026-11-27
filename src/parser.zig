@@ -23,10 +23,9 @@ const md4c = @import("md4c");
 pub fn Parser(comptime Visitor: type) type {
     return struct {
         inner: md4c.MD_PARSER,
-        visitor: *Visitor,
 
         /// `Flags.dialect_commonmark` and `Flags.dialect_github` can be used as `flags`.
-        pub fn init(visitor: *Visitor, flags: Flags) @This() {
+        pub fn init(flags: Flags) @This() {
             return .{
                 .inner = .{
                     .enter_block = enterBlock,
@@ -43,7 +42,6 @@ pub fn Parser(comptime Visitor: type) type {
                     .debug_log = null,
                     .syntax = null,
                 },
-                .visitor = visitor,
             };
         }
 
@@ -71,14 +69,19 @@ pub fn Parser(comptime Visitor: type) type {
             break :block Error;
         };
 
-        /// Parses Markdown of `input` and calls the visitor callbacks.
+        /// Parses Markdown of `input` and calls `visitor` callbacks.
         ///
         /// If a visitor callback returns an error (`CallbackError`),
         /// returns that error and stops parsing completely.
         ///
         /// If the `md4c` parser fails, `ParseError.ParseFailed` is returned.
-        pub fn parse(self: *const @This(), input: []const u8) (ParseError || CallbackError)!void {
-            const errno = md4c.md_parse(input.ptr, @intCast(input.len), &self.inner, self.visitor);
+        pub fn parse(self: *const @This(), visitor: *Visitor, input: []const u8) (ParseError || CallbackError)!void {
+            const errno = md4c.md_parse(
+                input.ptr,
+                @intCast(input.len),
+                &self.inner,
+                visitor,
+            );
 
             switch (errno) {
                 0 => {},
@@ -118,16 +121,12 @@ pub fn Parser(comptime Visitor: type) type {
             detail: ?*anyopaque,
             userdata: ?*anyopaque,
         ) c_int {
+            const visitor: *Visitor = @ptrCast(@alignCast(userdata));
+
             const block_tag: block.Type = @fromBackingInt(block_type);
-
-            switch (block_tag) {
-                inline else => |tag| {
-                    const visitor: *Visitor = @ptrCast(@alignCast(userdata));
-                    const detail_block = block.fromType(tag, detail);
-
-                    return callVisitor(callback_name, .{ visitor, detail_block });
-                },
-            }
+            return switch (block_tag) {
+                inline else => |tag| callVisitor(callback_name, .{ visitor, block.fromType(tag, detail) }),
+            };
         }
 
         fn callSpan(
@@ -136,16 +135,12 @@ pub fn Parser(comptime Visitor: type) type {
             detail: ?*anyopaque,
             userdata: ?*anyopaque,
         ) c_int {
+            const visitor: *Visitor = @ptrCast(@alignCast(userdata));
+
             const span_tag: span.Type = @fromBackingInt(span_type);
-
-            switch (span_tag) {
-                inline else => |tag| {
-                    const visitor: *Visitor = @ptrCast(@alignCast(userdata));
-                    const detail_span = span.fromType(tag, detail);
-
-                    return callVisitor(callback_name, .{ visitor, detail_span });
-                },
-            }
+            return switch (span_tag) {
+                inline else => |tag| callVisitor(callback_name, .{ visitor, span.fromType(tag, detail) }),
+            };
         }
 
         /// Returns an errno that can be returned from a raw `md4c` callback.
