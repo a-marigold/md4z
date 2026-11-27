@@ -45,37 +45,13 @@ pub fn Parser(comptime Visitor: type) type {
             };
         }
 
-        /// All possible errors from callbacks that can abort parsing.
-        pub const CallbackError = block: {
-            var Error: type = error{};
-
-            // Do || (merge) with all errors from callbacks
-            for (.{ "enterBlock", "leaveBlock", "enterSpan", "leaveSpan", "text" }) |decl_name| {
-                if (!@hasDecl(Visitor, decl_name))
-                    @compileError("`Visitor` must have " ++ decl_name ++ " callback");
-
-                const callback = @field(Visitor, decl_name);
-                const callback_info = @typeInfo(@TypeOf(callback)).@"fn";
-
-                const CallbackReturnType = callback_info.return_type orelse
-                    @compileError(decl_name ++ " callback cannot have a generic return type");
-
-                switch (@typeInfo(CallbackReturnType)) {
-                    .error_union => |info| Error = Error || info.error_set,
-                    else => {},
-                }
-            }
-
-            break :block Error;
-        };
-
-        /// Parses Markdown of `input` and calls `visitor` callbacks.
+        /// Parses Markdown of `input` and the calls the visitor callbacks.
         ///
         /// If a visitor callback returns an error (`CallbackError`),
         /// returns that error and stops parsing completely.
         ///
         /// If the `md4c` parser fails, `ParseError.ParseFailed` is returned.
-        pub fn parse(self: *const @This(), visitor: *Visitor, input: []const u8) (ParseError || CallbackError)!void {
+        pub fn parse(self: *const @This(), visitor: *Visitor, input: []const u8) (ParseError || CallbackError(Visitor))!void {
             const errno = md4c.md_parse(
                 input.ptr,
                 @intCast(input.len),
@@ -153,6 +129,30 @@ pub fn Parser(comptime Visitor: type) type {
             return 0;
         }
     };
+}
+
+/// All errors from `Visitor` callbacks.
+pub fn CallbackError(comptime Visitor: type) type {
+    var Error: type = error{};
+
+    // Do || (merge) with all errors from callbacks
+    for (.{ "enterBlock", "leaveBlock", "enterSpan", "leaveSpan", "text" }) |decl_name| {
+        if (!@hasDecl(Visitor, decl_name))
+            @compileError("`Visitor` must have " ++ decl_name ++ " callback");
+
+        const callback = @field(Visitor, decl_name);
+        const callback_info = @typeInfo(@TypeOf(callback)).@"fn";
+
+        const CallbackReturnType = callback_info.return_type orelse
+            @compileError(decl_name ++ " callback cannot have a generic return type");
+
+        switch (@typeInfo(CallbackReturnType)) {
+            .error_union => |info| Error = Error || info.error_set,
+            else => {},
+        }
+    }
+
+    return Error;
 }
 
 /// `parse` function returns this in
