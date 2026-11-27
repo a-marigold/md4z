@@ -13,14 +13,13 @@ const TextType = types.TextType;
 /// 1. Block and span generic callbacks receive:
 ///    - A mutable pointer to the visitor.
 ///    - Block or span, which is `anytype`.
-///      Possible types of it can be found in
-///      `block` and `span` namespaces.
+///      Types of blocks and spans are in `block` and `span` namespaces.
 /// 2. `text` receives:
 ///    - A mutable poitner to the visitor.
 ///    - `TextType` (e.g `normal` or `code`).
 ///    - `data`, which is a **non**-null-terminated slice of text.
 ///
-/// Callbacks can or can not return errors.
+/// Callbacks may or may not return errors.
 /// If a callback returns an error, `parse` stops and returns that error.
 ///
 /// See the example in [README](https://github.com/a-marigold/md4z/blob/main/README.md).
@@ -103,9 +102,9 @@ pub fn Parser(comptime Visitor: type) type {
         ) c_int {
             const visitor: *Visitor = @ptrCast(@alignCast(userdata));
 
-            const block_tag: block.Type = @fromBackingInt(block_type);
+            const block_tag: types.BlockType = @fromBackingInt(block_type);
             return switch (block_tag) {
-                inline else => |tag| callVisitor(callback_name, .{ visitor, block.fromType(tag, detail) }),
+                inline else => |tag| callVisitor(callback_name, .{ visitor, types.blockFromType(tag, detail) }),
             };
         }
 
@@ -117,9 +116,9 @@ pub fn Parser(comptime Visitor: type) type {
         ) c_int {
             const visitor: *Visitor = @ptrCast(@alignCast(userdata));
 
-            const span_tag: span.Type = @fromBackingInt(span_type);
+            const span_tag: types.SpanType = @fromBackingInt(span_type);
             return switch (span_tag) {
-                inline else => |tag| callVisitor(callback_name, .{ visitor, span.fromType(tag, detail) }),
+                inline else => |tag| callVisitor(callback_name, .{ visitor, types.spanFromType(tag, detail) }),
             };
         }
 
@@ -276,8 +275,7 @@ test "`parse` returns errors from callbacks and stops immediately" {
 
     try testing.expectEqual(ParseReturnTypeError, ParseError || BlockError || SpanError || TextError);
 
-    var visitor: Visitor = undefined;
-    var parser: ParserType = .init(&visitor, .{});
+    var parser: ParserType = .init(.{});
 
     const cases = .{
         .{ .field_name = "enter_block_return_value", .err = BlockError.SomeBlockFail },
@@ -288,7 +286,7 @@ test "`parse` returns errors from callbacks and stops immediately" {
     };
 
     inline for (cases) |case| {
-        visitor = .{
+        var visitor: Visitor = .{
             .enter_block_return_value = {},
             .leave_block_return_value = {},
             .enter_span_return_value = {},
@@ -297,7 +295,7 @@ test "`parse` returns errors from callbacks and stops immediately" {
         };
         @field(visitor, case.field_name) = case.err;
 
-        const result = parser.parse(
+        const result = parser.parse(&visitor,
             \\# **Hello**
             \\> Quote
         );

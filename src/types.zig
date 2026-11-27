@@ -4,6 +4,48 @@ const std = @import("std");
 const testing = std.testing;
 const md4c = @import("md4c");
 
+pub fn blockFromType(comptime block_type: BlockType, detail: ?*anyopaque) @field(block, @tagName(block_type)) {
+    const Block = @field(block, @tagName(block_type));
+    const block_info = @typeInfo(Block).@"struct";
+    const block_fields_len = block_info.field_names.len;
+
+    return switch (block_fields_len) {
+        0 => .{},
+        1 => switch (Block) {
+            block.TableHead => .{ .data = .{ .detail = @ptrCast(@alignCast(detail)) } },
+            else => .{ .detail = @ptrCast(@alignCast(detail)) },
+        },
+        else => unreachable,
+    };
+}
+/// Internal helper for `blockFromType`
+pub const BlockType = enum(md4c.MD_BLOCKTYPE) {
+    // Names are in PascalCase to easily access
+    // `block` type declarations (like `OrderedList`)
+    // without enum's snake_case conversion
+
+    Doc = md4c.MD_BLOCK_DOC,
+    Quote = md4c.MD_BLOCK_QUOTE,
+    UnorderedList = md4c.MD_BLOCK_UL,
+    OrderedList = md4c.MD_BLOCK_OL,
+    ListItem = md4c.MD_BLOCK_LI,
+    HorizontalRule = md4c.MD_BLOCK_HR,
+    Heading = md4c.MD_BLOCK_H,
+    CodeBlock = md4c.MD_BLOCK_CODE,
+    Html = md4c.MD_BLOCK_HTML,
+    Paragraph = md4c.MD_BLOCK_P,
+    Table = md4c.MD_BLOCK_TABLE,
+    TableHead = md4c.MD_BLOCK_THEAD,
+    TableBody = md4c.MD_BLOCK_TBODY,
+    TableRow = md4c.MD_BLOCK_TR,
+    TableHeadRow = md4c.MD_BLOCK_TH,
+    TableData = md4c.MD_BLOCK_TD,
+    FootnoteDeclSection = md4c.MD_BLOCK_FOOTNOTE_DEF_SECTION,
+    FootnoteDecl = md4c.MD_BLOCK_FOOTNOTE_DEF,
+    Admonition = md4c.MD_BLOCK_ADMONITION,
+    BlankLine = md4c.MD_BLOCK_BLANK,
+};
+
 // TODO: list item next line indentation rules:
 /// Type declarations of blocks that `enterBlock` and `leaveBlock` receive.
 ///
@@ -16,48 +58,6 @@ const md4c = @import("md4c");
 /// `struct {}` instead of `void` to create identity,
 /// so callbacks can use the block type in `switch` as unique prong.
 pub const block = struct {
-    pub fn fromType(comptime block_type: Type, detail: ?*anyopaque) @field(block, @tagName(block_type)) {
-        const BlockType = @field(block, @tagName(block_type));
-        const block_info = @typeInfo(BlockType).@"struct";
-        const block_fields_len = block_info.field_names.len;
-
-        return switch (block_fields_len) {
-            0 => .{},
-            1 => switch (BlockType) {
-                block.TableHead => .{ .data = .{ .detail = @ptrCast(@alignCast(detail)) } },
-                else => .{ .detail = @ptrCast(@alignCast(detail)) },
-            },
-            else => unreachable,
-        };
-    }
-    /// Internal helper for `fromType`.
-    pub const Type = enum(md4c.MD_BLOCKTYPE) {
-        // Names are in PascalCase to easily access
-        // `block` type declarations (like `OrderedList`)
-        // without enum's snake_case conversion
-
-        Doc = md4c.MD_BLOCK_DOC,
-        Quote = md4c.MD_BLOCK_QUOTE,
-        UnorderedList = md4c.MD_BLOCK_UL,
-        OrderedList = md4c.MD_BLOCK_OL,
-        ListItem = md4c.MD_BLOCK_LI,
-        HorizontalRule = md4c.MD_BLOCK_HR,
-        Heading = md4c.MD_BLOCK_H,
-        CodeBlock = md4c.MD_BLOCK_CODE,
-        Html = md4c.MD_BLOCK_HTML,
-        Paragraph = md4c.MD_BLOCK_P,
-        Table = md4c.MD_BLOCK_TABLE,
-        TableHead = md4c.MD_BLOCK_THEAD,
-        TableBody = md4c.MD_BLOCK_TBODY,
-        TableRow = md4c.MD_BLOCK_TR,
-        TableHeadRow = md4c.MD_BLOCK_TH,
-        TableData = md4c.MD_BLOCK_TD,
-        FootnoteDeclSection = md4c.MD_BLOCK_FOOTNOTE_DEF_SECTION,
-        FootnoteDecl = md4c.MD_BLOCK_FOOTNOTE_DEF,
-        Admonition = md4c.MD_BLOCK_ADMONITION,
-        BlankLine = md4c.MD_BLOCK_BLANK,
-    };
-
     pub const Doc = struct {};
     pub const Quote = struct {};
 
@@ -240,6 +240,41 @@ pub const block = struct {
     };
 };
 
+pub fn spanFromType(comptime span_type: SpanType, detail: ?*anyopaque) @field(span, @tagName(span_type)) {
+    const Span = @field(span, @tagName(span_type));
+    const span_info = @typeInfo(Span).@"struct";
+    const span_fields_len = span_info.field_names.len;
+
+    return switch (span_fields_len) {
+        0 => .{},
+        1 => .{ .detail = @ptrCast(@alignCast(detail)) },
+        else => unreachable,
+    };
+}
+/// Internal helper for `fromType`.
+pub const SpanType = enum(md4c.MD_SPANTYPE) {
+    // Names are in PascalCase to easily access
+    // `span` type declarations (like `WikiLink`)
+    // without enum's snake_case conversion
+
+    Emphasis = md4c.MD_SPAN_EM,
+    Strong = md4c.MD_SPAN_STRONG,
+    Link = md4c.MD_SPAN_A,
+    Img = md4c.MD_SPAN_IMG,
+    Code = md4c.MD_SPAN_CODE,
+    Insert = md4c.MD_SPAN_INS,
+    Delete = md4c.MD_SPAN_DEL,
+    LatexMath = md4c.MD_SPAN_LATEXMATH,
+    LatexMathDisplay = md4c.MD_SPAN_LATEXMATH_DISPLAY,
+    WikiLink = md4c.MD_SPAN_WIKILINK,
+    Underline = md4c.MD_SPAN_U,
+    Spoiler = md4c.MD_SPAN_SPOILER,
+    Superscript = md4c.MD_SPAN_SUPERSCRIPT,
+    Subscript = md4c.MD_SPAN_SUBSCRIPT,
+    FootnoteRef = md4c.MD_SPAN_FOOTNOTE_REF,
+    Mark = md4c.MD_SPAN_MARK,
+};
+
 /// Type declarations of spans that `enterSpan` and `leaveSpan` receive.
 ///
 /// - Use `promote` function of spans to translate their
@@ -251,41 +286,6 @@ pub const block = struct {
 /// `struct {}` instead of `void` to create identity,
 /// so callbacks can use the span type in `switch` as unique prong.
 pub const span = struct {
-    pub fn fromType(comptime span_type: Type, detail: ?*anyopaque) @field(span, @tagName(span_type)) {
-        const SpanType = @field(span, @tagName(span_type));
-        const span_info = @typeInfo(SpanType).@"struct";
-        const span_fields_len = span_info.field_names.len;
-
-        return switch (span_fields_len) {
-            0 => .{},
-            1 => .{ .detail = @ptrCast(@alignCast(detail)) },
-            else => unreachable,
-        };
-    }
-    /// Internal helper for `fromType`.
-    pub const Type = enum(md4c.MD_SPANTYPE) {
-        // Names are in PascalCase to easily access
-        // `span` type declarations (like `WikiLink`)
-        // without enum's snake_case conversion
-
-        Emphasis = md4c.MD_SPAN_EM,
-        Strong = md4c.MD_SPAN_STRONG,
-        Link = md4c.MD_SPAN_A,
-        Img = md4c.MD_SPAN_IMG,
-        Code = md4c.MD_SPAN_CODE,
-        Insert = md4c.MD_SPAN_INS,
-        Delete = md4c.MD_SPAN_DEL,
-        LatexMath = md4c.MD_SPAN_LATEXMATH,
-        LatexMathDisplay = md4c.MD_SPAN_LATEXMATH_DISPLAY,
-        WikiLink = md4c.MD_SPAN_WIKILINK,
-        Underline = md4c.MD_SPAN_U,
-        Spoiler = md4c.MD_SPAN_SPOILER,
-        Superscript = md4c.MD_SPAN_SUPERSCRIPT,
-        Subscript = md4c.MD_SPAN_SUBSCRIPT,
-        FootnoteRef = md4c.MD_SPAN_FOOTNOTE_REF,
-        Mark = md4c.MD_SPAN_MARK,
-    };
-
     // Empty structs instead of `void`
     // to create identity, so the types can be
     // used in `switch` as unique prongs
