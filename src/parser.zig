@@ -264,7 +264,7 @@ pub const block = struct {
     /// Internal helper for `fromType`.
     const Type = enum(md4c.MD_BLOCKTYPE) {
         // Names are in PascalCase to easily access
-        // `block` type declarations (like `FencedCode`)
+        // `block` type declarations (like `OrderedList`)
         // without enum's snake_case convertion
 
         Doc = md4c.MD_BLOCK_DOC,
@@ -274,7 +274,7 @@ pub const block = struct {
         ListItem = md4c.MD_BLOCK_LI,
         HorizontalRule = md4c.MD_BLOCK_HR,
         Heading = md4c.MD_BLOCK_H,
-        FencedCodeBlock = md4c.MD_BLOCK_CODE,
+        CodeBlock = md4c.MD_BLOCK_CODE,
         Html = md4c.MD_BLOCK_HTML,
         Paragraph = md4c.MD_BLOCK_P,
         Table = md4c.MD_BLOCK_TABLE,
@@ -283,8 +283,8 @@ pub const block = struct {
         TableRow = md4c.MD_BLOCK_TR,
         TableHeadRow = md4c.MD_BLOCK_TH,
         TableData = md4c.MD_BLOCK_TD,
-        FootnoteDefSection = md4c.MD_BLOCK_FOOTNOTE_DEF_SECTION,
-        Footnote = md4c.MD_BLOCK_FOOTNOTE_DEF,
+        FootnoteDeclSection = md4c.MD_BLOCK_FOOTNOTE_DEF_SECTION,
+        FootnoteDecl = md4c.MD_BLOCK_FOOTNOTE_DEF,
         Admonition = md4c.MD_BLOCK_ADMONITION,
         BlankLine = md4c.MD_BLOCK_BLANK,
     };
@@ -319,7 +319,7 @@ pub const block = struct {
             return .{
                 .start = detail.start,
                 .is_tight = detail.is_tight != 0,
-                .marker = @fromBackingInt(detail.mark_delimiter),
+                .delimiter = @fromBackingInt(detail.mark_delimiter),
             };
         }
         pub const Promoted = struct { start: u32, is_tight: bool, delimiter: Delimiter };
@@ -368,7 +368,8 @@ pub const block = struct {
         pub const Promoted = struct { level: u32 };
     };
 
-    pub const FencedCodeBlock = struct {
+    /// Fenced or indented code block.
+    pub const CodeBlock = struct {
         detail: *const md4c.MD_BLOCK_CODE_DETAIL,
 
         pub fn promote(self: @This()) Promoted {
@@ -389,6 +390,9 @@ pub const block = struct {
         };
 
         pub const Fence = enum(md4c.MD_CHAR) {
+            /// Indented code block has no fence.
+            none = 0,
+
             @"`" = '`',
             @"~" = '~',
         };
@@ -432,9 +436,11 @@ pub const block = struct {
         };
     };
 
-    pub const FootnoteDefSection = struct {};
+    /// Section with one or more `FootnoteDecl` inside.
+    pub const FootnoteDeclSection = struct {};
 
-    pub const Footnote = struct {
+    /// Footnote declaration.
+    pub const FootnoteDecl = struct {
         detail: *const md4c.MD_BLOCK_FOOTNOTE_DEF_DETAIL,
 
         pub fn promote(self: @This()) Promoted {
@@ -565,6 +571,7 @@ pub const span = struct {
     pub const Superscript = struct {};
     pub const Subscript = struct {};
 
+    /// Reference to a footnote declaration.
     pub const FootnoteRef = struct {
         detail: *const md4c.MD_SPAN_FOOTNOTE_REF_DETAIL,
 
@@ -590,7 +597,7 @@ pub const span = struct {
 pub const Attribute = struct {
     detail: md4c.MD_ATTRIBUTE,
 
-    inline fn promote(self: *@This()) Promoted {
+    pub fn promote(self: @This()) Promoted {
         const detail = self.detail;
         return switch (detail.text) {
             null => .{ .empty = {} },
@@ -598,6 +605,7 @@ pub const Attribute = struct {
                 .data = detail.text[0..detail.size],
                 .substr_types = @ptrCast(detail.substr_types),
                 .substr_offsets = @ptrCast(detail.substr_offsets),
+                .substr_index = 0,
             } },
         };
     }
@@ -619,7 +627,7 @@ pub const Attribute = struct {
     pub const Text = struct {
         data: []const u8,
 
-        substr_types: [*]const TextType,
+        substr_types: [*]const SubstrType,
         substr_offsets: [*]const u32,
         substr_index: usize,
 
@@ -628,16 +636,19 @@ pub const Attribute = struct {
         /// `normal`, `entity` or `null_char`.
         pub fn nextSubstr(self: *@This()) ?Substr {
             const data = self.data;
+            const types = self.substr_types;
             const offsets = self.substr_offsets;
 
             const substr_start = offsets[self.substr_index];
             if (substr_start == data.len) return null;
 
+            const substr_type = types[self.substr_index];
+
             self.substr_index += 1;
             const substr_end = offsets[self.substr_index];
 
             return .{
-                .type = self.substr_types[self.substr_index],
+                .type = substr_type,
                 .data = data[substr_start..substr_end],
             };
         }
@@ -645,9 +656,9 @@ pub const Attribute = struct {
         pub const Substr = struct { type: SubstrType, data: []const u8 };
 
         const SubstrType = enum(md4c.MD_TEXTTYPE) {
-            normal = TextType.normal,
-            entity = TextType.entity,
-            null_char = TextType.null_char,
+            normal = @backingInt(TextType.normal),
+            entity = @backingInt(TextType.entity),
+            null_char = @backingInt(TextType.null_char),
         };
     };
 };
@@ -695,7 +706,6 @@ test "`parse` returns errors from callbacks and stops immediately" {
     };
 
     const ParserType = Parser(Visitor);
-
     const ParseReturnType = @typeInfo(@TypeOf(ParserType.parse)).@"fn".return_type.?;
     const ParseReturnTypeError = @typeInfo(ParseReturnType).error_union.error_set;
 
