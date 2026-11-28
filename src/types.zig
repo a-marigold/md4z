@@ -4,15 +4,15 @@ const std = @import("std");
 const testing = std.testing;
 const md4c = @import("md4c");
 
-pub fn blockFromType(comptime block_type: BlockType, detail: ?*anyopaque) @field(block, @tagName(block_type)) {
-    const Block = @field(block, @tagName(block_type));
+pub fn blockFromType(comptime block_type: BlockType, detail: ?*anyopaque) @field(blocks, @tagName(block_type)) {
+    const Block = @field(blocks, @tagName(block_type));
     const block_info = @typeInfo(Block).@"struct";
     const block_fields_len = block_info.field_names.len;
 
     return switch (block_fields_len) {
         0 => .{},
         1 => switch (Block) {
-            block.TableHead => .{ .data = .{ .detail = @ptrCast(@alignCast(detail)) } },
+            blocks.TableHead => .{ .data = .{ .detail = @ptrCast(@alignCast(detail)) } },
             else => .{ .detail = @ptrCast(@alignCast(detail)) },
         },
         else => unreachable,
@@ -57,7 +57,7 @@ pub const BlockType = enum(md4c.MD_BLOCKTYPE) {
 /// Blocks that don't have additional info are just `struct {}`:\
 /// `struct {}` instead of `void` to create identity,
 /// so callbacks can use the block type in `switch` as unique prong.
-pub const block = struct {
+pub const blocks = struct {
     pub const Doc = struct {};
     pub const Quote = struct {};
 
@@ -240,8 +240,8 @@ pub const block = struct {
     };
 };
 
-pub fn spanFromType(comptime span_type: SpanType, detail: ?*anyopaque) @field(span, @tagName(span_type)) {
-    const Span = @field(span, @tagName(span_type));
+pub fn spanFromType(comptime span_type: SpanType, detail: ?*anyopaque) @field(spans, @tagName(span_type)) {
+    const Span = @field(spans, @tagName(span_type));
     const span_info = @typeInfo(Span).@"struct";
     const span_fields_len = span_info.field_names.len;
 
@@ -285,7 +285,7 @@ pub const SpanType = enum(md4c.MD_SPANTYPE) {
 /// Spans that don't have additional info are just `struct {}`:\
 /// `struct {}` instead of `void` to create identity,
 /// so callbacks can use the span type in `switch` as unique prong.
-pub const span = struct {
+pub const spans = struct {
     // Empty structs instead of `void`
     // to create identity, so the types can be
     // used in `switch` as unique prongs
@@ -454,7 +454,7 @@ test "`ListItem.promote` returns `Promoted.item` if `detail` isn't a task" {
         .task_mark_offset = undefined,
     };
 
-    const list_item: block.ListItem = .{ .detail = &item_detail };
+    const list_item: blocks.ListItem = .{ .detail = &item_detail };
 
     const promoted = list_item.promote();
     try testing.expectEqual(.item, promoted);
@@ -469,7 +469,7 @@ test "`ListItem.promote` returns `Promoted.task` if `detail` is a task" {
         .task_mark_offset = marker_offset,
     };
 
-    const list_item: block.ListItem = .{ .detail = &task_detail };
+    const list_item: blocks.ListItem = .{ .detail = &task_detail };
 
     const promoted = list_item.promote();
 

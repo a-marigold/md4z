@@ -7,8 +7,8 @@ const parser = @import("parser.zig");
 pub const Parser = parser.Parser;
 pub const ParseError = parser.ParseError;
 
-pub const block = types.block;
-pub const span = types.span;
+pub const blocks = types.blocks;
+pub const spans = types.spans;
 pub const Attribute = types.Attribute;
 pub const TextType = types.TextType;
 

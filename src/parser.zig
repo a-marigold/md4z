@@ -3,8 +3,8 @@ const math = std.math;
 const testing = std.testing;
 const md4c = @import("md4c");
 const types = @import("types.zig");
-const block = types.block;
-const span = types.span;
+const blocks = types.blocks;
+const spans = types.spans;
 const TextType = types.TextType;
 
 /// `Visitor` is a namespace (`struct`, `enum`, `union`, `opaque`) with `pub fn` callbacks.
@@ -309,5 +309,3 @@ test "`parse` returns errors from callbacks" {
         try testing.expectError(case.err, result);
     }
 }
-
-test "`parse` result is identical to the original `md4c.md_parse` result" {}
