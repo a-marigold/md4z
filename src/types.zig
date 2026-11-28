@@ -251,7 +251,7 @@ pub fn spanFromType(comptime span_type: SpanType, detail: ?*anyopaque) @field(sp
         else => unreachable,
     };
 }
-/// Internal helper for `fromType`.
+/// Internal helper for `spanFromType`.
 pub const SpanType = enum(md4c.MD_SPANTYPE) {
     // Names are in PascalCase to easily access
     // `span` type declarations (like `WikiLink`)
@@ -386,6 +386,7 @@ pub const Attribute = struct {
         substr_types: [*]const SubstrType,
         substr_offsets: [*]const u32,
 
+        // TODO: by value or not by value?
         pub fn iterate(self: @This()) SubstrIterator {
             return .{ .promoted = self, .substr_index = 0 };
         }
@@ -504,14 +505,82 @@ test "`Attribute.promote` returns `Promoted` if `detail` isn't empty" {
 
     const attr: Attribute = .{ .detail = detail };
 
-    const promoted = attr.promote();
+    const promoted = attr.promote() orelse return error.TestUnexpectedNull;
 
-    try testing.expect(promoted != null);
+    try testing.expectEqual(text, promoted.data);
 
-    try testing.expectEqual(text, promoted.?.data);
+    try testing.expectEqual(substr_type, promoted.substr_types[0]);
 
-    try testing.expectEqual(substr_type, promoted.?.substr_types[0]);
+    try testing.expectEqual(0, promoted.substr_offsets[0]);
+    try testing.expectEqual(text.len, promoted.substr_offsets[1]);
+}
 
-    try testing.expectEqual(0, promoted.?.substr_offsets[0]);
-    try testing.expectEqual(text.len, promoted.?.substr_offsets[1]);
+test "`Attribute.SubstrIterator` returns substrings" {
+    const foo_data = "foo ";
+    const foo_type: Attribute.SubstrType = .normal;
+
+    const entity_data = "gt;";
+    const entity_type: Attribute.SubstrType = .entity;
+
+    const text = foo_data ++ entity_data;
+
+    const detail: md4c.MD_ATTRIBUTE = .{
+        .text = text,
+        .size = text.len,
+        .substr_types = &[_]md4c.MD_TEXTTYPE{
+            @backingInt(foo_type),
+            @backingInt(entity_type),
+        },
+        .substr_offsets = &[_]c_uint{ 0, foo_data.len, text.len },
+    };
+
+    const attr: Attribute = .{ .detail = detail };
+
+    const promoted = attr.promote() orelse return error.TestUnexpectedNull;
+
+    var iter = promoted.iterate();
+
+    const foo_substr = iter.next() orelse return error.TestUnexpectedNull;
+    try testing.expectEqual(foo_type, foo_substr.type);
+    try testing.expectEqual(foo_data, foo_substr.data);
+
+    const entity_substr = iter.next() orelse return error.TextUnexpectedNull;
+    try testing.expectEqual(entity_type, entity_substr.type);
+    try testing.expectEqual(entity_data, entity_substr.data);
+}
+
+test "`Attribute.SubstrIterator` always returns `null` after the last iteration" {
+    const foobar_data = "foobar ";
+    const foo_type: Attribute.SubstrType = .normal;
+
+    const entity_data = "&quot;";
+    const entity_type: Attribute.SubstrType = .entity;
+
+    const text = foobar_data ++ entity_data;
+
+    const detail: md4c.MD_ATTRIBUTE = .{
+        .text = text,
+        .size = text.len,
+        .substr_types = &[_]md4c.MD_TEXTTYPE{
+            @backingInt(foo_type),
+            @backingInt(entity_type),
+        },
+        .substr_offsets = &[_]c_uint{ 0, foobar_data.len, text.len },
+    };
+
+    const attr: Attribute = .{ .detail = detail };
+
+    const promoted = attr.promote() orelse return error.TestUnexpectedNull;
+
+    var iter = promoted.iterate();
+
+    // foobar
+    _ = iter.next() orelse return error.TestUnexpectedNull;
+
+    // entity
+    _ = iter.next() orelse return error.TestUnexpectedNull;
+
+    inline for (0..3) |_| {
+        try testing.expectEqual(null, iter.next());
+    }
 }
