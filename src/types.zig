@@ -105,18 +105,18 @@ pub const block = struct {
         pub fn promote(self: @This()) Promoted {
             const detail = self.detail;
             return switch (detail.is_task) {
-                false => .{ .item = {} },
-                true => .{
+                0 => .{ .item = {} },
+                else => .{
                     .task = .{
                         .marker = @fromBackingInt(detail.task_mark),
-                        .offset = detail.task_mark_offset,
+                        .marker_offset = detail.task_mark_offset,
                     },
                 },
             };
         }
         pub const Promoted = union(enum) {
             item,
-            task: struct { marker: TaskMarker, offset: u32 },
+            task: struct { marker: TaskMarker, marker_offset: u32 },
         };
 
         pub const TaskMarker = enum(md4c.MD_CHAR) {
@@ -446,9 +446,36 @@ pub const TextType = enum(md4c.MD_TEXTTYPE) {
     latex_math = md4c.MD_TEXT_LATEXMATH,
 };
 
-test {
-    testing.refAllDecls(span);
-    testing.refAllDecls(block);
+test "`ListItem.promote` returns `Promoted.item` if `detail` isn't a task" {
+    const item_detail: md4c.MD_BLOCK_LI_DETAIL = .{
+        .is_task = 0,
+        .task_mark = undefined,
+        .task_mark_offset = undefined,
+    };
+
+    const list_item: block.ListItem = .{ .detail = &item_detail };
+
+    const promoted = list_item.promote();
+    try testing.expectEqual(.item, promoted);
+}
+test "`ListItem.promote` returns `Promoted.task` if `detail` is a task" {
+    const marker = 'x';
+    const marker_offset = 1;
+
+    const task_detail: md4c.MD_BLOCK_LI_DETAIL = .{
+        .is_task = 1,
+        .task_mark = marker,
+        .task_mark_offset = marker_offset,
+    };
+
+    const list_item: block.ListItem = .{ .detail = &task_detail };
+
+    const promoted = list_item.promote();
+
+    try testing.expectEqual(.task, promoted);
+
+    try testing.expectEqual(marker, promoted.task.marker);
+    try testing.expectEqual(marker_offset, promoted.task.marker_offset);
 }
 
 test "`Attribute.promote` returns `null` if `detail` is empty" {
@@ -461,12 +488,13 @@ test "`Attribute.promote` returns `null` if `detail` is empty" {
 
     const attr: Attribute = .{ .detail = empty_detail };
 
-    try testing.expectEqual(null, attr.promote());
+    const promoted = attr.promote();
+    try testing.expectEqual(null, promoted);
 }
-
 test "`Attribute.promote` returns `Promoted` if `detail` isn't empty" {
     const text = "abc";
     const substr_type: Attribute.SubstrType = .normal;
+
     const detail: md4c.MD_ATTRIBUTE = .{
         .text = text,
         .size = text.len,
