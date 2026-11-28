@@ -1,4 +1,5 @@
 const std = @import("std");
+const math = std.math;
 const testing = std.testing;
 const md4c = @import("md4c");
 const types = @import("types.zig");
@@ -50,21 +51,21 @@ pub fn Parser(comptime Visitor: type) type {
 
         /// Parses Markdown of `input` and the calls the visitor callbacks.
         ///
+        /// Returns `ParseError.InputTooLong` if `input.len` doesn't fit in `u32`.
+        ///
         /// If a visitor callback returns an error (`CallbackError`),
         /// returns that error and stops parsing completely.
         ///
         /// If the `md4c` parser fails, `ParseError.ParseFailed` is returned.
         pub fn parse(self: *const @This(), visitor: *Visitor, input: []const u8) (ParseError || CallbackError(Visitor))!void {
-            const errno = md4c.md_parse(
-                input.ptr,
-                @intCast(input.len),
-                &self.inner,
-                visitor,
-            );
+            if (input.len > math.maxInt(md4c.MD_SIZE)) return ParseError.InputTooLong;
+            const input_size: md4c.MD_SIZE = @intCast(input.len);
+
+            const errno = md4c.md_parse(input.ptr, input_size, &self.inner, visitor);
 
             switch (errno) {
                 0 => {},
-                -1 => return ParseError.ParseFailed,
+                -1 => return ParseError.ParseFail,
                 else => {
                     const AnyErrorInt = @Int(.unsigned, @bitSizeOf(anyerror));
                     const err = @errorFromInt(@as(AnyErrorInt, @intCast(errno)));
@@ -158,9 +159,14 @@ pub fn CallbackError(comptime Visitor: type) type {
     return Error;
 }
 
-/// `parse` function returns this in
-/// case of a critical error in `md4c` parser.
-pub const ParseError = error{ParseFailed};
+/// `parse` function error.
+pub const ParseError = error{
+    /// General error in `md4c` parser.
+    ParseFail,
+
+    /// Markdown input in `md4c` must fit `u32`.
+    InputTooLong,
+};
 
 pub const Flags = packed struct(u32) {
     /// In MD_TEXT_NORMAL, collapse non-trivial whitespace into single ' '
@@ -238,7 +244,7 @@ pub const Flags = packed struct(u32) {
     pub const dialect_github: @This() = @fromBackingInt(md4c.MD_DIALECT_GITHUB);
 };
 
-test "`parse` returns errors from callbacks and stops immediately" {
+test "`parse` returns errors from callbacks" {
     const BlockError = error{SomeBlockFail};
     const SpanError = error{SomeSpanFail};
     const TextError = error{SomeTextFail};
