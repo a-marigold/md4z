@@ -377,7 +377,6 @@ pub const Attribute = struct {
                 .data = detail.text[0..detail.size],
                 .substr_types = @ptrCast(detail.substr_types),
                 .substr_offsets = @ptrCast(detail.substr_offsets),
-                .substr_index = 0,
             },
         };
     }
@@ -388,7 +387,7 @@ pub const Attribute = struct {
         substr_offsets: [*]const u32,
 
         pub fn iterate(self: @This()) SubstrIterator {
-            return .{ .attr = self, .substr_index = 0 };
+            return .{ .promoted = self, .substr_index = 0 };
         }
     };
 
@@ -399,18 +398,18 @@ pub const Attribute = struct {
     ///
     /// Invariants:
     /// - `substr_offsets[0] == 0`
-    /// - `substr_offsets[last_index + 1] == data.len` (even if it's 0)
+    /// - `substr_offsets[last_index + 1] == data.len`
     pub const SubstrIterator = struct {
-        attr: Promoted,
+        promoted: Promoted,
         substr_index: usize,
 
         /// Returns substrings of `Text.data`:
         ///
         /// `normal`, `entity` or `null_char`.
         pub fn next(self: *@This()) ?Substr {
-            const data = self.data;
-            const types = self.substr_types;
-            const offsets = self.substr_offsets;
+            const data = self.promoted.data;
+            const types = self.promoted.substr_types;
+            const offsets = self.promoted.substr_offsets;
             const substr_index = self.substr_index;
 
             const substr_start = offsets[substr_index];
@@ -450,4 +449,41 @@ pub const TextType = enum(md4c.MD_TEXTTYPE) {
 test {
     testing.refAllDecls(span);
     testing.refAllDecls(block);
+}
+
+test "`Attribute.promote` returns `null` if `detail` is empty" {
+    const empty_detail: md4c.MD_ATTRIBUTE = .{
+        .text = null,
+        .size = 0,
+        .substr_types = null,
+        .substr_offsets = null,
+    };
+
+    const attr: Attribute = .{ .detail = empty_detail };
+
+    try testing.expectEqual(null, attr.promote());
+}
+
+test "`Attribute.promote` returns `Promoted` if `detail` isn't empty" {
+    const text = "abc";
+    const substr_type: Attribute.SubstrType = .normal;
+    const detail: md4c.MD_ATTRIBUTE = .{
+        .text = text,
+        .size = text.len,
+        .substr_types = &[_]md4c.MD_TEXTTYPE{@backingInt(substr_type)},
+        .substr_offsets = &[_]c_uint{ 0, text.len },
+    };
+
+    const attr: Attribute = .{ .detail = detail };
+
+    const promoted = attr.promote();
+
+    try testing.expect(promoted != null);
+
+    try testing.expectEqual(text, promoted.?.data);
+
+    try testing.expectEqual(substr_type, promoted.?.substr_types[0]);
+
+    try testing.expectEqual(0, promoted.?.substr_offsets[0]);
+    try testing.expectEqual(text.len, promoted.?.substr_offsets[1]);
 }
